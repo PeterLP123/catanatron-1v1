@@ -138,6 +138,12 @@ class CustomTimeRemainingColumn(TimeRemainingColumn):
     help="Prevents robber placement on tiles that would block opponents with fewer than 3 actual victory points, unless no other robber move is available.",
 )
 @click.option(
+    "--colonist-1v1",
+    default=False,
+    is_flag=True,
+    help="Colonist.io 1v1 rules: 2 players, 15 VP, balanced dice, friendly robber (2 visible VP), safe hand 9.",
+)
+@click.option(
     "--quiet",
     default=False,
     is_flag=True,
@@ -164,6 +170,7 @@ def simulate(
     config_map,
     config_number_placement,
     config_friendly_robber,
+    colonist_1v1,
     quiet,
     help_players,
 ):
@@ -194,13 +201,16 @@ def simulate(
     output_options = OutputOptions(
         output, output_format, include_board_tensor, db, step_db
     )
-    game_config = GameConfigOptions(
+    game_config = GameConfigOptions.from_cli(
         config_discard_limit,
         config_vps_to_win,
         config_map,
         config_number_placement,
         config_friendly_robber,
+        colonist_1v1,
     )
+    if colonist_1v1 and len(players) != 2:
+        return print("Error: --colonist-1v1 requires exactly 2 players (e.g. --players=R,R)")
     play_batch(
         num,
         players,
@@ -228,6 +238,43 @@ class GameConfigOptions:
     map_type: Literal["BASE", "TOURNAMENT", "MINI"] = "BASE"
     number_placement: NumberPlacement = "official_spiral"
     friendly_robber: bool = False
+    dice_mode: str = "uniform"
+    friendly_robber_vp_threshold: int = 3
+    friendly_robber_use_visible_vp: bool = False
+    colonist_1v1: bool = False
+
+    @classmethod
+    def from_cli(
+        cls,
+        discard_limit,
+        vps_to_win,
+        map_type,
+        number_placement,
+        friendly_robber,
+        colonist_1v1,
+    ):
+        if colonist_1v1:
+            from catanatron.colonist_1v1 import COLONIST_1V1_SETTINGS
+
+            settings = COLONIST_1V1_SETTINGS
+            return cls(
+                discard_limit=settings.discard_limit,
+                vps_to_win=settings.vps_to_win,
+                map_type=settings.map_type,
+                number_placement=settings.number_placement,
+                friendly_robber=settings.friendly_robber,
+                dice_mode=settings.dice_mode,
+                friendly_robber_vp_threshold=settings.friendly_robber_vp_threshold,
+                friendly_robber_use_visible_vp=settings.friendly_robber_use_visible_vp,
+                colonist_1v1=True,
+            )
+        return cls(
+            discard_limit=discard_limit,
+            vps_to_win=vps_to_win,
+            map_type=map_type,
+            number_placement=number_placement,
+            friendly_robber=friendly_robber,
+        )
 
     def __post_init__(self):
         if self.number_placement == "official_spiral" and self.map_type == "TOURNAMENT":
@@ -265,13 +312,19 @@ def play_batch_core(num_games, players, game_config, accumulators=[]):
         for player in players:
             player.reset_state()
         catan_map = build_map(game_config.map_type, game_config.number_placement)
-        game = Game(
-            players,
-            discard_limit=game_config.discard_limit,
-            friendly_robber=game_config.friendly_robber,
-            vps_to_win=game_config.vps_to_win,
-            catan_map=catan_map,
-        )
+        if game_config.colonist_1v1:
+            game = Game(players, catan_map=catan_map, colonist_1v1=True)
+        else:
+            game = Game(
+                players,
+                discard_limit=game_config.discard_limit,
+                friendly_robber=game_config.friendly_robber,
+                friendly_robber_vp_threshold=game_config.friendly_robber_vp_threshold,
+                friendly_robber_use_visible_vp=game_config.friendly_robber_use_visible_vp,
+                vps_to_win=game_config.vps_to_win,
+                dice_mode=game_config.dice_mode,
+                catan_map=catan_map,
+            )
         game.play(accumulators)
         yield game
 

@@ -15,7 +15,10 @@ from catanatron.models.decks import (
     starting_devcard_bank,
     starting_resource_bank,
 )
+from catanatron.models.dice_controller_balanced import DiceControllerBalanced
 from catanatron.models.player import Color, Player
+
+DiceMode = str  # "balanced" | "uniform"
 
 # These will be prefixed by P0_, P1_, ...
 # Create Player State blueprint
@@ -91,7 +94,10 @@ class State:
         catan_map=None,
         discard_limit=7,
         friendly_robber=False,
+        friendly_robber_vp_threshold: int = 3,
+        friendly_robber_use_visible_vp: bool = False,
         number_placement: NumberPlacement = "official_spiral",
+        dice_mode: DiceMode = "balanced",
         initialize=True,
     ):
         if initialize:
@@ -102,6 +108,14 @@ class State:
             )
             self.discard_limit = discard_limit
             self.friendly_robber = friendly_robber
+            self.friendly_robber_vp_threshold = friendly_robber_vp_threshold
+            self.friendly_robber_use_visible_vp = friendly_robber_use_visible_vp
+            self.dice_mode = dice_mode
+            self.dice_controller = (
+                DiceControllerBalanced(len(self.colors))
+                if dice_mode == "balanced"
+                else None
+            )
 
             # feature-ready dictionary
             self.player_state = dict()
@@ -161,6 +175,12 @@ class State:
         state_copy.players = self.players
         state_copy.discard_limit = self.discard_limit  # immutable
         state_copy.friendly_robber = self.friendly_robber  # immutable
+        state_copy.friendly_robber_vp_threshold = self.friendly_robber_vp_threshold
+        state_copy.friendly_robber_use_visible_vp = self.friendly_robber_use_visible_vp
+        state_copy.dice_mode = self.dice_mode
+        state_copy.dice_controller = (
+            self.dice_controller.copy() if self.dice_controller is not None else None
+        )
 
         state_copy.board = self.board.copy()
 

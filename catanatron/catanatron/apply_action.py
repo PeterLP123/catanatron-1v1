@@ -261,7 +261,11 @@ def apply_roll(state: State, action: Action, action_record=None):
     key = player_key(state, action.color)
     state.player_state[f"{key}_HAS_ROLLED"] = True
 
-    dices = action_record.result if action_record is not None else roll_dice()
+    dices = (
+        action_record.result
+        if action_record is not None
+        else roll_dice(state, action.color)
+    )
     number = dices[0] + dices[1]
     action = Action(action.color, action.action_type, dices)
 
@@ -524,12 +528,22 @@ def apply_cancel_trade(state: State, action: Action):
 
 
 # ===== Helper Functions =====
-def roll_dice():
-    """Yields two random numbers
+def roll_dice(state=None, player_color=None):
+    """Roll two dice for the current turn.
+
+    Uses the balanced dice deck when ``state.dice_mode == "balanced"``,
+    otherwise independent uniform dice.
 
     Returns:
         tuple[int, int]: 2-tuple of random numbers from 1 to 6 inclusive.
     """
+    if (
+        state is not None
+        and getattr(state, "dice_mode", "uniform") == "balanced"
+        and state.dice_controller is not None
+        and player_color is not None
+    ):
+        return state.dice_controller.throw_dice(player_color)
     return (random.randint(1, 6), random.randint(1, 6))
 
 

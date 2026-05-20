@@ -98,9 +98,13 @@ class Game:
         seed: Optional[int] = None,
         discard_limit: int = 7,
         friendly_robber: bool = False,
+        friendly_robber_vp_threshold: int = 3,
+        friendly_robber_use_visible_vp: bool = False,
         vps_to_win: int = 10,
         catan_map: Optional[CatanMap] = None,
         number_placement: NumberPlacement = "official_spiral",
+        dice_mode: str = "balanced",
+        colonist_1v1: bool = False,
         initialize: bool = True,
     ):
         """Creates a game (doesn't run it).
@@ -111,22 +115,62 @@ class Game:
             discard_limit (int, optional): Discard limit to use. Defaults to 7.
             vps_to_win (int, optional): Victory Points needed to win. Defaults to 10.
             catan_map (CatanMap, optional): Map to use. Defaults to None.
+            dice_mode (str, optional): "balanced" for Colonist-style deck dice, "uniform"
+                for independent fair dice. Defaults to "balanced".
+            colonist_1v1 (bool, optional): Apply Colonist.io 1v1 rules (2 players, 15 VP,
+                balanced dice, friendly robber at 2 visible VP, safe hand 9). Defaults to False.
+            friendly_robber_vp_threshold (int, optional): Block robber on opponents below
+                this many victory points when friendly robber is on. Defaults to 3.
+            friendly_robber_use_visible_vp (bool, optional): Use visible VP for friendly
+                robber threshold instead of actual VP (includes hidden dev cards).
             initialize (bool, optional): Whether to initialize. Defaults to True.
         """
         if initialize:
+            if colonist_1v1:
+                from catanatron.colonist_1v1 import (
+                    COLONIST_1V1_SETTINGS,
+                    colonist_1v1_game_kwargs,
+                    validate_colonist_1v1_players,
+                )
+
+                validate_colonist_1v1_players(players)
+                colonist_kwargs = colonist_1v1_game_kwargs()
+                vps_to_win = colonist_kwargs["vps_to_win"]
+                discard_limit = colonist_kwargs["discard_limit"]
+                friendly_robber = colonist_kwargs["friendly_robber"]
+                friendly_robber_vp_threshold = colonist_kwargs[
+                    "friendly_robber_vp_threshold"
+                ]
+                friendly_robber_use_visible_vp = colonist_kwargs[
+                    "friendly_robber_use_visible_vp"
+                ]
+                dice_mode = colonist_kwargs["dice_mode"]
+                if catan_map is None:
+                    from catanatron.models.map import build_map
+
+                    catan_map = build_map(
+                        COLONIST_1V1_SETTINGS.map_type,
+                        COLONIST_1V1_SETTINGS.number_placement,
+                    )
+
             self.seed = seed if seed is not None else random.randrange(sys.maxsize)
             random.seed(self.seed)
 
             self.id = str(uuid.uuid4())
             self.vps_to_win = vps_to_win
             self.friendly_robber = friendly_robber
+            self.colonist_1v1 = colonist_1v1
             self.state = State(
                 players,
                 catan_map,
                 discard_limit=discard_limit,
                 friendly_robber=friendly_robber,
+                friendly_robber_vp_threshold=friendly_robber_vp_threshold,
+                friendly_robber_use_visible_vp=friendly_robber_use_visible_vp,
                 number_placement=number_placement,
+                dice_mode=dice_mode,
             )
+            self.dice_mode = dice_mode
             self.playable_actions = generate_playable_actions(self.state)
 
     def play(self, accumulators=[], decide_fn=None):
@@ -223,6 +267,8 @@ class Game:
         game_copy.id = self.id
         game_copy.vps_to_win = self.vps_to_win
         game_copy.friendly_robber = self.friendly_robber
+        game_copy.colonist_1v1 = getattr(self, "colonist_1v1", False)
+        game_copy.dice_mode = self.dice_mode
         game_copy.state = self.state.copy()
         game_copy.playable_actions = self.playable_actions
         return game_copy

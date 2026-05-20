@@ -5,6 +5,7 @@ from gymnasium import spaces
 import numpy as np
 
 from catanatron.game import Game, TURNS_LIMIT
+from catanatron.colonist_1v1 import COLONIST_1V1_SETTINGS, colonist_1v1_game_kwargs
 from catanatron.models.player import Color, Player, RandomPlayer
 from catanatron.models.map import build_map
 from catanatron.features import (
@@ -51,10 +52,19 @@ class CatanatronEnv(gym.Env):
     def __init__(self, config=None):
         self.dtype = np.float32
         self.config = config or dict()
+        self.colonist_1v1 = self.config.get("colonist_1v1", False)
         self.invalid_action_reward = self.config.get("invalid_action_reward", -1)
         self.reward_function = self.config.get("reward_function", simple_reward)
-        self.map_type = self.config.get("map_type", "BASE")
-        self.vps_to_win = self.config.get("vps_to_win", 10)
+        if self.colonist_1v1:
+            self.map_type = self.config.get("map_type", COLONIST_1V1_SETTINGS.map_type)
+            self.vps_to_win = self.config.get(
+                "vps_to_win", COLONIST_1V1_SETTINGS.vps_to_win
+            )
+            self._colonist_game_kwargs = colonist_1v1_game_kwargs()
+        else:
+            self.map_type = self.config.get("map_type", "BASE")
+            self.vps_to_win = self.config.get("vps_to_win", 10)
+            self._colonist_game_kwargs = None
         self.render_mode = self.config.get("render_mode", None)
         self.render_scale = self.config.get("render_scale", 1.0)
         self.renderer = None  # Lazy init on first render()
@@ -65,6 +75,8 @@ class CatanatronEnv(gym.Env):
         self.enemies = self.config.get("enemies", [RandomPlayer(Color.RED)])
         self.player_colors = tuple([Color.BLUE] + [p.color for p in self.enemies])
         assert all(p.color != Color.BLUE for p in self.enemies)
+        if self.colonist_1v1:
+            assert len(self.enemies) == 1, "Colonist 1v1 requires exactly one enemy"
 
         self.p0 = Player(Color.BLUE)
         self.players = [self.p0] + self.enemies  # type: ignore
@@ -173,12 +185,20 @@ class CatanatronEnv(gym.Env):
         catan_map = build_map(self.map_type)
         for player in self.players:
             player.reset_state()
-        self.game = Game(
-            players=self.players,
-            seed=seed,
-            catan_map=catan_map,
-            vps_to_win=self.vps_to_win,
-        )
+        if self.colonist_1v1:
+            self.game = Game(
+                players=self.players,
+                seed=seed,
+                catan_map=catan_map,
+                colonist_1v1=True,
+            )
+        else:
+            self.game = Game(
+                players=self.players,
+                seed=seed,
+                catan_map=catan_map,
+                vps_to_win=self.vps_to_win,
+            )
         self.invalid_actions_count = 0
 
         self._advance_until_p0_decision()

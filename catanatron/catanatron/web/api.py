@@ -59,16 +59,25 @@ def post_game_endpoint():
     if not isinstance(friendly_robber, bool):
         abort(400, description="'friendly_robber' must be a boolean")
 
+    colonist_1v1 = request.json.get("colonist_1v1", False)
+    if not isinstance(colonist_1v1, bool):
+        abort(400, description="'colonist_1v1' must be a boolean")
+    if colonist_1v1 and len(player_keys) != 2:
+        abort(400, description="'colonist_1v1' requires exactly 2 players")
+
     players = list(map(player_factory, zip(player_keys, Color)))
     catan_map = build_map(map_template)
 
-    game = Game(
-        players=players,
-        discard_limit=discard_limit,
-        friendly_robber=friendly_robber,
-        vps_to_win=vps_to_win,
-        catan_map=catan_map,
-    )
+    if colonist_1v1:
+        game = Game(players=players, catan_map=catan_map, colonist_1v1=True)
+    else:
+        game = Game(
+            players=players,
+            discard_limit=discard_limit,
+            friendly_robber=friendly_robber,
+            vps_to_win=vps_to_win,
+            catan_map=catan_map,
+        )
     upsert_game_state(game)
     return jsonify({"game_id": game.id})
 

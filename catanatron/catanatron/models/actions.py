@@ -32,6 +32,7 @@ from catanatron.models.enums import (
 from catanatron.state import State
 from catanatron.state_functions import (
     get_actual_victory_points,
+    get_visible_victory_points,
     get_player_buildings,
     get_player_freqdeck,
     player_can_afford_dev_card,
@@ -261,7 +262,12 @@ def _robber_action_blocks_low_vp_enemy(state, color, action) -> bool:
         if color == candidate_color:
             continue
 
-        if get_actual_victory_points(state, candidate_color) < 3:
+        vp_fn = (
+            get_visible_victory_points
+            if state.friendly_robber_use_visible_vp
+            else get_actual_victory_points
+        )
+        if vp_fn(state, candidate_color) < state.friendly_robber_vp_threshold:
             return True
 
     return False
