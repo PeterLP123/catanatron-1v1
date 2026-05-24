@@ -4,6 +4,8 @@ icon: binary
 
 # Data and Machine Learning
 
+> **Colonist.io 1v1 pipeline** (teacher parquet → BC → Maskable PPO): see [docs/COLONIST_1V1.md](../../docs/COLONIST_1V1.md).
+
 ## Generating Data
 
 Using the CLI you can generate data, suitable for Machine Learning and Data Analysis.

@@ -62,7 +62,9 @@ model = MaskablePPO(MaskableActorCriticPolicy, env, verbose=1)
 model.learn(total_timesteps=10_000)
 ```
 
-## Colonist.io 1v1 training (outline)
+## Colonist.io 1v1 training
+
+**Full guide:** [docs/COLONIST_1V1.md](../../../../docs/COLONIST_1V1.md) (workflow, presets, eval, troubleshooting).
 
 Rules match Colonist 1v1 via ``colonist_1v1=True`` on :class:`~catanatron.gym.envs.catanatron_env.CatanatronEnv`
 (15 VP, balanced dice, friendly robber, 9-card hand limit on ``BASE``).

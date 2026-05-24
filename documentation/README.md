@@ -20,6 +20,8 @@ layout:
 
 # Welcome to Catanatron!
 
+> **Colonist.io 1v1 training:** see the dedicated guide in [docs/COLONIST_1V1.md](../docs/COLONIST_1V1.md) and the [project README](../README.md).
+
 Catanatron is a high-performance simulator for The Settlers of Catan, designed to help you develop, test, and benchmark AI players. Whether you're a machine learning researcher, game developer, or just a Catan enthusiast curious about AI strategies, Catanatron provides the tools to explore the full strategic depth of the game at scale.
 
 ### What is Catanatron?

@@ -15,6 +15,10 @@
 * [Graphical User Interface](using-catanatron/graphical-user-interface.md)
 * [Examples](using-catanatron/integrations.md)
 
+## Colonist.io 1v1 (this fork)
+
+* [Colonist 1v1 training guide](../docs/COLONIST_1V1.md)
+
 ## Advanced
 
 * [Making Catanatron Stronger](advanced/making-catanatron-stronger.md)
