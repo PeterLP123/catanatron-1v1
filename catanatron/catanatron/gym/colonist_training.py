@@ -8,16 +8,29 @@ import json
 import os
 import random
 import shutil
+import socket
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Union
+from uuid import uuid4
 
 import numpy as np
 
 from catanatron.models.player import Color, Player
 
 RUN_MARKER_NAME = ".colonist_run_started"
+MANIFEST_NAME = "run_manifest.json"
+EVENTS_NAME = "training_events.jsonl"
+MODEL_REGISTRY_NAME = "models_index.jsonl"
+
+# Teacher / baseline opponent codes for mixed league sampling.
+DEFAULT_LEAGUE_TEACHER_CODES: tuple[str, ...] = ("F", "VP", "W")
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def touch_run_marker(output_dir: Path) -> Path:
@@ -56,16 +69,20 @@ def resolve_teacher_parquet_paths(data_dir: Path) -> list[Path]:
     return sorted(paths, key=lambda p: p.stat().st_mtime)
 
 
-def load_teacher_parquet(data_dir: Path, *, progress: bool = True):
-    """Load teacher parquet logs into a single DataFrame."""
+def load_teacher_parquet(data_dir: Union[Path, Sequence[Path]], *, progress: bool = True):
+    """Load teacher parquet logs from one or more directories into a single DataFrame."""
     import pandas as pd
 
-    paths = resolve_teacher_parquet_paths(data_dir)
+    data_dirs = [Path(p) for p in data_dir] if isinstance(data_dir, Sequence) and not isinstance(data_dir, (str, bytes, Path)) else [Path(data_dir)]  # type: ignore[arg-type]
+    paths: list[Path] = []
+    for d in data_dirs:
+        paths.extend(resolve_teacher_parquet_paths(d))
     if not paths:
-        raise FileNotFoundError(f"No .parquet files under {data_dir}")
+        raise FileNotFoundError(f"No .parquet files under {data_dirs}")
 
     if progress:
-        print(f"Loading {len(paths)} parquet file(s) from {data_dir} ...")
+        joined = ", ".join(os.fspath(d) for d in data_dirs)
+        print(f"Loading {len(paths)} parquet file(s) from {joined} ...")
 
     frames = []
     for i, path in enumerate(paths, start=1):
@@ -140,6 +157,8 @@ class BcCheckpointMeta:
     epochs: int
     val_accuracy: Optional[float] = None
     train_rows: int = 0
+    data_dirs: list[str] = field(default_factory=list)
+    val_loss: Optional[float] = None
 
     def save(self, path: Path) -> None:
         path.write_text(json.dumps(asdict(self), indent=2))
@@ -180,7 +199,13 @@ class CheckpointLeague:
     def _save_index(self) -> None:
         self._index_path.write_text(json.dumps(self._entries, indent=2))
 
-    def register(self, checkpoint_path: Union[str, Path], *, label: Optional[str] = None) -> str:
+    def register(
+        self,
+        checkpoint_path: Union[str, Path],
+        *,
+        label: Optional[str] = None,
+        metrics: Optional[dict[str, Any]] = None,
+    ) -> str:
         """Copy checkpoint into league pool; prune to ``max_checkpoints``."""
         src = Path(checkpoint_path)
         if not src.exists():
@@ -190,7 +215,12 @@ class CheckpointLeague:
         dest = self.league_dir / f"{label}{src.suffix}"
         shutil.copy2(src, dest)
 
-        entry = {"path": str(dest), "label": label}
+        entry = {
+            "path": str(dest),
+            "label": label,
+            "created_at": utc_now_iso(),
+            "metrics": metrics or {},
+        }
         self._entries = [e for e in self._entries if e["path"] != str(dest)]
         self._entries.append(entry)
         while len(self._entries) > self.max_checkpoints:
@@ -213,9 +243,68 @@ class CheckpointLeague:
         r = rng or np.random.default_rng()
         return str(r.choice(paths))
 
+    def entries(self) -> list[dict[str, Any]]:
+        return [dict(e) for e in self._entries if Path(e["path"]).exists()]
 
-# Teacher / baseline opponent codes for mixed league sampling.
-DEFAULT_LEAGUE_TEACHER_CODES: tuple[str, ...] = ("F", "VP", "W")
+
+@dataclass(frozen=True)
+class CurriculumStage:
+    """Opponent mix beginning at ``start_step``."""
+
+    start_step: int
+    league_weight: float
+    teacher_weight: float
+    baseline_weight: float
+    teacher_codes: tuple[str, ...] = DEFAULT_LEAGUE_TEACHER_CODES
+    baseline_code: str = "W"
+
+
+@dataclass(frozen=True)
+class CurriculumSchedule:
+    stages: tuple[CurriculumStage, ...]
+
+    def stage_for(self, step: int) -> CurriculumStage:
+        active = self.stages[0]
+        for stage in self.stages:
+            if step >= stage.start_step:
+                active = stage
+            else:
+                break
+        return active
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"stages": [asdict(stage) for stage in self.stages]}
+
+
+CURRICULUM_PRESETS: dict[str, CurriculumSchedule] = {
+    "balanced": CurriculumSchedule(
+        stages=(
+            CurriculumStage(0, league_weight=0.0, teacher_weight=0.65, baseline_weight=0.35),
+            CurriculumStage(100_000, league_weight=0.30, teacher_weight=0.55, baseline_weight=0.15),
+            CurriculumStage(500_000, league_weight=0.55, teacher_weight=0.40, baseline_weight=0.05),
+        )
+    ),
+    "strong": CurriculumSchedule(
+        stages=(
+            CurriculumStage(0, league_weight=0.0, teacher_weight=0.75, baseline_weight=0.25, teacher_codes=("VP", "F")),
+            CurriculumStage(250_000, league_weight=0.35, teacher_weight=0.60, baseline_weight=0.05, teacher_codes=("F", "VP")),
+            CurriculumStage(1_000_000, league_weight=0.60, teacher_weight=0.40, baseline_weight=0.0, teacher_codes=("F", "G:25")),
+        )
+    ),
+    "self_play": CurriculumSchedule(
+        stages=(
+            CurriculumStage(0, league_weight=0.25, teacher_weight=0.55, baseline_weight=0.20),
+            CurriculumStage(250_000, league_weight=0.70, teacher_weight=0.30, baseline_weight=0.0),
+        )
+    ),
+}
+
+
+def curriculum_from_name(name: str) -> CurriculumSchedule:
+    if name not in CURRICULUM_PRESETS:
+        valid = ", ".join(sorted(CURRICULUM_PRESETS))
+        raise ValueError(f"Unknown curriculum {name!r}; expected one of: {valid}")
+    return CURRICULUM_PRESETS[name]
 
 
 def make_mixed_opponent_factory(
@@ -229,6 +318,9 @@ def make_mixed_opponent_factory(
     map_type: str = "BASE",
     p1_color: Color = Color.RED,
     rng: Optional[np.random.Generator] = None,
+    curriculum: Optional[CurriculumSchedule] = None,
+    step_getter: Optional[Callable[[], int]] = None,
+    telemetry: Optional["TrainingRunTracker"] = None,
 ) -> Callable[[], Player]:
     """
     Factory for ``SelfPlayEnv(opponent_factory=..., sample_each_reset=True)``.
@@ -242,10 +334,20 @@ def make_mixed_opponent_factory(
     player_colors = (Color.BLUE, p1_color)
 
     def _factory() -> Player:
+        nonlocal teacher_codes, league_weight, teacher_weight, baseline_weight, baseline_code
+        if curriculum is not None:
+            stage = curriculum.stage_for(step_getter() if step_getter else 0)
+            teacher_codes = stage.teacher_codes
+            league_weight = stage.league_weight
+            teacher_weight = stage.teacher_weight
+            baseline_weight = stage.baseline_weight
+            baseline_code = stage.baseline_code
         roll = r.random()
         if roll < league_weight:
             ckpt = league.sample_path(r)
             if ckpt is not None:
+                if telemetry:
+                    telemetry.event("opponent_sampled", source="league", checkpoint=ckpt)
                 return load_sb3_player(
                     ckpt,
                     p1_color,
@@ -254,10 +356,101 @@ def make_mixed_opponent_factory(
                 )
         if roll < league_weight + teacher_weight and teacher_codes:
             code = str(r.choice(list(teacher_codes)))
-            return parse_cli_string(f"{code},R")[0]
-        return parse_cli_string(f"{baseline_code},R")[0]
+            if telemetry:
+                telemetry.event("opponent_sampled", source="teacher", code=code)
+            player = parse_cli_string(code)[0]
+            player.color = p1_color
+            return player
+        if telemetry:
+            telemetry.event("opponent_sampled", source="baseline", code=baseline_code)
+        player = parse_cli_string(baseline_code)[0]
+        player.color = p1_color
+        return player
 
     return _factory
+
+
+@dataclass
+class TrainingPreset:
+    timesteps: int
+    save_freq: int
+    eval_freq: int
+    eval_games: int
+    n_envs: int
+    curriculum: str
+
+
+TRAINING_PRESETS: dict[str, TrainingPreset] = {
+    "smoke": TrainingPreset(20_000, 10_000, 10_000, 10, 1, "balanced"),
+    "standard": TrainingPreset(500_000, 50_000, 50_000, 50, 4, "balanced"),
+    "strong": TrainingPreset(5_000_000, 100_000, 250_000, 100, 8, "strong"),
+    "overnight": TrainingPreset(20_000_000, 250_000, 500_000, 150, 8, "strong"),
+}
+
+
+class TrainingRunTracker:
+    """JSON manifest + JSONL event writer used by scripts and the Rich TUI."""
+
+    def __init__(
+        self,
+        run_dir: Union[str, Path],
+        *,
+        run_id: Optional[str] = None,
+        preset: Optional[str] = None,
+        command: Optional[Sequence[str]] = None,
+        extra: Optional[dict[str, Any]] = None,
+    ):
+        self.run_dir = Path(run_dir)
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.run_id = run_id or f"c1_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
+        self.manifest_path = self.run_dir / MANIFEST_NAME
+        self.events_path = self.run_dir / EVENTS_NAME
+        self.registry_path = self.run_dir / MODEL_REGISTRY_NAME
+        self._manifest: dict[str, Any] = {
+            "schema_version": "1.0",
+            "run_id": self.run_id,
+            "created_at": utc_now_iso(),
+            "updated_at": utc_now_iso(),
+            "host": socket.gethostname(),
+            "run_dir": os.fspath(self.run_dir),
+            "preset": preset,
+            "command": list(command) if command else None,
+            "phase": "created",
+            "artifacts": {},
+        }
+        if extra:
+            self._manifest.update(extra)
+        if self.manifest_path.exists():
+            try:
+                previous = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+                previous.update(self._manifest)
+                self._manifest = previous
+            except json.JSONDecodeError:
+                pass
+        self.write_manifest()
+
+    def write_manifest(self) -> None:
+        self._manifest["updated_at"] = utc_now_iso()
+        self.manifest_path.write_text(json.dumps(self._manifest, indent=2, sort_keys=True))
+
+    def update_manifest(self, **kwargs: Any) -> None:
+        self._manifest.update(kwargs)
+        self.write_manifest()
+
+    def phase(self, name: str, **data: Any) -> None:
+        self.update_manifest(phase=name)
+        self.event("phase", phase=name, **data)
+
+    def event(self, event_type: str, **data: Any) -> dict[str, Any]:
+        row = {
+            "time": utc_now_iso(),
+            "run_id": self.run_id,
+            "type": event_type,
+            **data,
+        }
+        with self.events_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, sort_keys=True) + "\n")
+        return row
 
 
 def write_dataset_metadata(

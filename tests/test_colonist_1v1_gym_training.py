@@ -10,12 +10,21 @@ import pytest
 from catanatron import Color
 from catanatron.colonist_1v1_eval import (
     DEFAULT_BENCHMARK_GATES,
+    EvalProtocol,
+    EvaluationReport,
+    MatchupResult,
+    append_model_registry,
+    get_eval_protocol,
+    summarize_report,
     wilson_score_interval,
     evaluate_matchup,
 )
 from catanatron.gym.colonist_rewards import colonist_shaped_reward
 from catanatron.gym.colonist_training import (
     CheckpointLeague,
+    TrainingRunTracker,
+    curriculum_from_name,
+    make_mixed_opponent_factory,
     resolve_teacher_parquet_paths,
     warmstart_bc_into_maskable_ppo,
     write_dataset_metadata,
@@ -146,6 +155,67 @@ def test_evaluate_matchup_mocked():
 
 def test_default_gates_order():
     assert DEFAULT_BENCHMARK_GATES["R"] > DEFAULT_BENCHMARK_GATES["AB:2"]
+
+
+def test_eval_protocol_and_registry_schema(tmp_path):
+    proto = get_eval_protocol("fast", num_games=12)
+    assert proto.opponents == ("R", "W", "VP", "F")
+    assert proto.num_games == 12
+
+    report = EvaluationReport(
+        agent="L:model.zip",
+        meta={"model": {"checkpoint_path": "model.zip"}, "protocol": {"name": "fast"}},
+        matchups=[
+            MatchupResult("R", "L:model.zip", 10, 8, 2, 0, 0.8, 0.5, 0.9, 10, 4, 6, 100),
+            MatchupResult("F", "L:model.zip", 10, 1, 9, 0, 0.1, 0.02, 0.4, 4, 10, -6, 80),
+        ],
+    )
+    report.summary = summarize_report(report.matchups)
+    registry = tmp_path / "models_index.jsonl"
+    row = append_model_registry(registry, report, report_path=tmp_path / "report.json")
+    assert registry.exists()
+    assert row["summary"]["weighted_score"] < 0.8
+    assert row["win_rates"]["F"] == 0.1
+
+
+def test_curriculum_schedule_changes_weights():
+    schedule = curriculum_from_name("strong")
+    early = schedule.stage_for(0)
+    late = schedule.stage_for(1_000_000)
+    assert early.teacher_weight > early.league_weight
+    assert late.league_weight > early.league_weight
+
+
+def test_mixed_opponent_factory_uses_live_league_fallback():
+    league = MagicMock()
+    league.sample_path.return_value = None
+    factory = make_mixed_opponent_factory(
+        league=league,
+        league_weight=1.0,
+        teacher_weight=0.0,
+        baseline_weight=0.0,
+        baseline_code="W",
+        rng=np.random.default_rng(0),
+    )
+    player = factory()
+    assert player.color == Color.RED
+    league.sample_path.assert_called()
+
+
+def test_training_run_tracker_writes_manifest_and_events(tmp_path):
+    tracker = TrainingRunTracker(tmp_path, run_id="test-run", preset="smoke")
+    tracker.phase("ppo_training")
+    tracker.event("ppo_progress", timesteps=123)
+    assert (tmp_path / "run_manifest.json").exists()
+    assert "ppo_progress" in (tmp_path / "training_events.jsonl").read_text()
+
+
+def test_tui_dashboard_loads_empty_run(tmp_path):
+    pytest.importorskip("rich")
+    from examples.colonist_1v1_tui import build_dashboard
+
+    panel = build_dashboard(tmp_path)
+    assert panel is not None
 
 
 def test_warmstart_bc_into_ppo_policy():

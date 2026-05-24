@@ -29,7 +29,7 @@ pip install --upgrade pip wheel
 
 echo "==> catanatron + training deps (no pygame — not needed for RL)"
 pip install -e .
-pip install "gymnasium<=0.29.1" numpy pandas fastparquet pyarrow
+pip install "gymnasium<=0.29.1" numpy pandas fastparquet pyarrow rich tensorboard
 pip install torch stable-baselines3 sb3-contrib
 
 echo "==> Verify"

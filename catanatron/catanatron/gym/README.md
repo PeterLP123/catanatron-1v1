@@ -81,10 +81,23 @@ terminal ±1 with small VP deltas for dense training signals.
 **PPO training** — ``examples/colonist_1v1_train.py`` (vectorized option, checkpoint league,
 mixed opponents, BC warm-start, post-run benchmark).
 
+Recommended stronger run::
+
+    python examples/colonist_1v1_train.py --preset strong --run-dir runs/c1_strong \
+        --bc-checkpoint runs/c1_strong/bc.pt --mixed-league --tensorboard
+
 **Evaluation** — ``examples/colonist_1v1_evaluate.py`` and
-``examples/colonist_1v1_benchmark_report.py`` (Wilson CI + win-rate gates).
+``examples/colonist_1v1_benchmark_report.py`` (Wilson CI + win-rate gates). Use
+``--protocol fast``, ``--protocol milestone``, or ``--protocol full`` for comparable reports.
+
+**Progress dashboard** — ``examples/colonist_1v1_tui.py --run-dir runs/c1_strong`` renders
+a Rich terminal UI from ``run_manifest.json``, ``training_events.jsonl``, and
+``models_index.jsonl``. It shows phase, BC/PPO progress, checkpoint leaderboard, key win
+rates, promotions, and recent events.
 
 **Self-play / league** — ``SelfPlayEnv`` + :class:`catanatron.gym.colonist_training.CheckpointLeague`.
+``--mixed-league`` now uses a live curriculum-backed opponent factory, so new checkpoints are
+sampled during the same PPO run instead of only after restarting.
 
 **Learned players** — CLI ``L:policy.zip`` (SB3), ``T:policy.pt`` (Torch BC + meta).
 

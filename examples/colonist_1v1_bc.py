@@ -21,6 +21,7 @@ import numpy as np
 
 from catanatron.gym.colonist_training import (
     BcCheckpointMeta,
+    TrainingRunTracker,
     build_mlp_layers,
     load_teacher_parquet,
 )
@@ -28,18 +29,41 @@ from catanatron.gym.colonist_training import (
 
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--data-dir", type=Path, required=True, help="Directory of game *.parquet.")
+    p.add_argument(
+        "--data-dir",
+        type=Path,
+        nargs="+",
+        required=True,
+        help="One or more directories of game *.parquet files.",
+    )
     p.add_argument("--epochs", type=int, default=5)
     p.add_argument("--batch-size", type=int, default=4096)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--val-fraction", type=float, default=0.1)
     p.add_argument("--hidden", type=int, nargs=2, default=(512, 512))
+    p.add_argument(
+        "--n-actions",
+        type=int,
+        default=332,
+        help="Policy action head size; keep full action space even if rare actions are absent.",
+    )
     p.add_argument("--out", type=Path, default=Path("colonist_bc_policy.pt"))
     p.add_argument("--tensorboard", type=Path, default=None)
+    p.add_argument("--run-dir", type=Path, default=None)
     args = p.parse_args(argv)
 
     import torch
     from torch import nn
+
+    tracker = (
+        TrainingRunTracker(args.run_dir, command=["colonist_1v1_bc.py", *argv])
+        if args.run_dir and argv is not None
+        else TrainingRunTracker(args.run_dir, command=None)
+        if args.run_dir
+        else None
+    )
+    if tracker:
+        tracker.phase("bc_training", data_dirs=[str(p) for p in args.data_dir])
 
     df = load_teacher_parquet(args.data_dir)
     feat_cols = sorted(c for c in df.columns if c.startswith("F_"))
@@ -60,7 +84,7 @@ def main(argv: list[str] | None = None) -> None:
     x_train, y_train = x[train_idx], y[train_idx]
     x_val, y_val = x[val_idx], y[val_idx]
 
-    n_actions = int(y.max().item() + 1)
+    n_actions = max(args.n_actions, int(y.max().item() + 1))
     obs_dim = x.shape[1]
     hidden = tuple(args.hidden)
 
@@ -103,6 +127,15 @@ def main(argv: list[str] | None = None) -> None:
             writer.add_scalar("loss/train", train_loss, epoch)
             writer.add_scalar("loss/val", val_loss, epoch)
             writer.add_scalar("accuracy/val", val_acc, epoch)
+        if tracker:
+            tracker.event(
+                "bc_epoch",
+                epoch=epoch + 1,
+                epochs=args.epochs,
+                train_loss=train_loss,
+                val_loss=val_loss,
+                val_accuracy=val_acc,
+            )
     if writer is not None:
         writer.close()
 
@@ -115,8 +148,18 @@ def main(argv: list[str] | None = None) -> None:
         epochs=args.epochs,
         val_accuracy=val_acc if n_val else None,
         train_rows=int(x_train.shape[0]),
+        data_dirs=[str(p) for p in args.data_dir],
+        val_loss=val_loss if n_val else None,
     )
     meta.save(args.out.with_suffix(".meta.json"))
+    if tracker:
+        tracker.event(
+            "bc_complete",
+            checkpoint=str(args.out),
+            meta_path=str(args.out.with_suffix(".meta.json")),
+            val_accuracy=val_acc if n_val else None,
+        )
+        tracker.update_manifest(bc_checkpoint=str(args.out), phase="bc_complete")
     print(
         f"Wrote {args.out} and {args.out.with_suffix('.meta.json')}  "
         f"(obs_dim={obs_dim}, n_actions={n_actions})"
