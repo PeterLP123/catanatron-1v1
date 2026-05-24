@@ -90,10 +90,12 @@ Recommended stronger run::
 ``examples/colonist_1v1_benchmark_report.py`` (Wilson CI + win-rate gates). Use
 ``--protocol fast``, ``--protocol milestone``, or ``--protocol full`` for comparable reports.
 
-**Progress dashboard** — ``examples/colonist_1v1_tui.py --run-dir runs/c1_strong`` renders
-a Rich terminal UI from ``run_manifest.json``, ``training_events.jsonl``, and
-``models_index.jsonl``. It shows phase, BC/PPO progress, checkpoint leaderboard, key win
-rates, promotions, and recent events.
+**Training command center** — ``examples/colonist_1v1_tui.py`` launches a Textual terminal
+app for the whole workflow: run discovery, teacher data generation, BC, PPO, evaluation,
+ranking, and logs. Install it with ``pip install -e ".[tui]"``. For scripts/CI,
+``examples/colonist_1v1_tui.py --run-dir runs/c1_strong --once`` still renders a static
+Rich snapshot from ``run_manifest.json``, ``training_events.jsonl``, and
+``models_index.jsonl``.
 
 **Self-play / league** — ``SelfPlayEnv`` + :class:`catanatron.gym.colonist_training.CheckpointLeague`.
 ``--mixed-league`` now uses a live curriculum-backed opponent factory, so new checkpoints are

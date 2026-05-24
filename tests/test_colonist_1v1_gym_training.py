@@ -29,6 +29,15 @@ from catanatron.gym.colonist_training import (
     warmstart_bc_into_maskable_ppo,
     write_dataset_metadata,
 )
+from catanatron.gym.tui_data import (
+    build_bc_command,
+    build_data_commands,
+    detect_warnings,
+    load_registry,
+    summarize_run,
+    update_manifest,
+)
+from catanatron.gym.tui_jobs import JobRunner
 from catanatron.gym.envs.catanatron_env import CatanatronEnv
 from catanatron.gym.wrappers.self_play import SelfPlayEnv
 from catanatron.players.weighted_random import WeightedRandomPlayer
@@ -216,6 +225,81 @@ def test_tui_dashboard_loads_empty_run(tmp_path):
 
     panel = build_dashboard(tmp_path)
     assert panel is not None
+
+
+def test_tui_run_summary_registry_and_warnings(tmp_path):
+    update_manifest(
+        tmp_path,
+        run_id="run-a",
+        phase="ppo_training",
+        training={"timesteps": 1000},
+    )
+    (tmp_path / "training_events.jsonl").write_text(
+        '{"type":"ppo_progress","timesteps":500}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "models_index.jsonl").write_text(
+        '{"checkpoint_label":"a","summary":{"weighted_score":0.1},"win_rates":{"F":0.0}}\n'
+        '{"checkpoint_label":"b","summary":{"weighted_score":0.7},"win_rates":{"F":0.5}}\n',
+        encoding="utf-8",
+    )
+    summary = summarize_run(tmp_path)
+    rows = load_registry(tmp_path)
+    assert summary.progress_ratio == 0.5
+    assert rows[0]["checkpoint_label"] == "b"
+    assert not detect_warnings(tmp_path, {"phase": "done"}, [], rows)
+
+
+def test_tui_command_builders():
+    data_cmds = build_data_commands(
+        python="python",
+        teacher_specs=["F,F", "G:25,F"],
+        num_games=3,
+        data_root=Path("data/run"),
+    )
+    assert data_cmds[0][-1] == "data/run/F_F"
+    bc_cmd = build_bc_command(
+        python="python",
+        data_dirs=[Path("data/run/F_F"), Path("data/run/G_25_F")],
+        epochs=2,
+        run_dir=Path("runs/x"),
+    )
+    assert "--data-dir" in bc_cmd
+    assert "runs/x/bc.pt" in bc_cmd
+
+
+def test_job_runner_streams_and_records_status(tmp_path):
+    import sys
+    import time
+
+    lines = []
+    runner = JobRunner(tmp_path, on_log=lines.append)
+    job = runner.start(
+        "short",
+        [sys.executable, "-c", "print('hello from job')"],
+    )
+    deadline = time.time() + 5
+    while job.status in {"pending", "running"} and time.time() < deadline:
+        time.sleep(0.05)
+    assert job.status == "succeeded"
+    assert job.exit_code == 0
+    assert "hello from job" in "\n".join(lines)
+    assert "job_finished" in (tmp_path / "training_events.jsonl").read_text()
+
+
+def test_textual_app_smoke(tmp_path):
+    pytest.importorskip("textual")
+    import asyncio
+    from examples.colonist_1v1_tui import make_textual_app
+
+    async def run_app():
+        app = make_textual_app(tmp_path, tmp_path / "run", 0.1)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause(0.1)
+            await pilot.press("4")
+            await pilot.pause(0.1)
+
+    asyncio.run(run_app())
 
 
 def test_warmstart_bc_into_ppo_policy():
