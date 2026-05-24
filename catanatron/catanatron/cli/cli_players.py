@@ -9,6 +9,7 @@ from catanatron.players.minimax import AlphaBetaPlayer, SameTurnAlphaBetaPlayer
 from catanatron.players.search import VictoryPointPlayer
 from catanatron.players.mcts import MCTSPlayer
 from catanatron.players.playouts import GreedyPlayoutsPlayer
+from catanatron.players.learned import Sb3CheckpointPlayer, TorchBcCheckpointPlayer
 
 
 # Player must have a CODE, NAME, DESCRIPTION, CLASS.
@@ -63,6 +64,18 @@ CLI_PLAYERS = [
         "SameTurnAlphaBetaPlayer",
         "AlphaBeta but searches only within turn",
         SameTurnAlphaBetaPlayer,
+    ),
+    CliPlayer(
+        "L",
+        "Sb3CheckpointPlayer",
+        "MaskablePPO policy (sb3-contrib). Pass checkpoint path, e.g. L:runs/ppo.zip",
+        Sb3CheckpointPlayer,
+    ),
+    CliPlayer(
+        "T",
+        "TorchBcCheckpointPlayer",
+        "Torch BC policy (.pt + .meta.json). e.g. T:runs/colonist_bc_policy.pt",
+        TorchBcCheckpointPlayer,
     ),
 ]
 

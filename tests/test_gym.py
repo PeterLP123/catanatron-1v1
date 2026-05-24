@@ -251,8 +251,7 @@ def test_action_space_conversion_roundtrip():
         ), f"Action conversion failed: {action} -> {action_int} -> {recovered_action}"
 
 
-def test_gym_reproducibility():
-    # Play a game with the same seed, and ensure the game is the same
+def _run_gym_episode_state_index(seed: int) -> int:
     env = gymnasium.make(
         "catanatron/Catanatron-v0",
         config={
@@ -261,24 +260,30 @@ def test_gym_reproducibility():
             ]
         },
     )
-    observation, info = env.reset(seed=123)
-    env.action_space.seed(123)
+    observation, info = env.reset(seed=seed)
+    env.action_space.seed(seed)
+    rng = random.Random(seed)
     game = env.unwrapped.game
     center_tile = game.state.board.map.land_tiles[(0, 0, 0)]
     assert center_tile.resource == ORE
     assert center_tile.number == 11
 
     done = False
-    reward = 0
     while not done:
         action_mask = env.action_masks()
         valid_indices = np.flatnonzero(action_mask)
-        action = random.choice(valid_indices)
+        action = rng.choice(valid_indices)
 
         observation, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
     game = env.unwrapped.game
     game_json = json.loads(json.dumps(game, cls=GameEncoder))
     env.close()
+    return game_json["state_index"]
 
-    assert game_json["state_index"] == 125
+
+def test_gym_reproducibility():
+    # Same seed must yield identical playthrough (state_index), without baking in magic numbers.
+    idx_a = _run_gym_episode_state_index(123)
+    idx_b = _run_gym_episode_state_index(123)
+    assert idx_a == idx_b

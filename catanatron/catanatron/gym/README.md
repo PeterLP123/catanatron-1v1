@@ -62,6 +62,32 @@ model = MaskablePPO(MaskableActorCriticPolicy, env, verbose=1)
 model.learn(total_timesteps=10_000)
 ```
 
+## Colonist.io 1v1 training (outline)
+
+Rules match Colonist 1v1 via ``colonist_1v1=True`` on :class:`~catanatron.gym.envs.catanatron_env.CatanatronEnv`
+(15 VP, balanced dice, friendly robber, 9-card hand limit on ``BASE``).
+
+**Data generation** — use strong teachers (not ``W,W``)::
+
+    python examples/colonist_1v1_generate_data.py --num 5000 --output data/c1_ff --teachers F,F
+
+Writes ``dataset_meta.json`` beside parquet (``catanatron.gym.colonist_training``).
+
+**Shaped reward** — :func:`catanatron.gym.colonist_rewards.colonist_shaped_reward` combines
+terminal ±1 with small VP deltas for dense training signals.
+
+**Behavioral cloning** — ``examples/colonist_1v1_bc.py`` (validation accuracy + ``.meta.json``).
+
+**PPO training** — ``examples/colonist_1v1_train.py`` (vectorized option, checkpoint league,
+mixed opponents, BC warm-start, post-run benchmark).
+
+**Evaluation** — ``examples/colonist_1v1_evaluate.py`` and
+``examples/colonist_1v1_benchmark_report.py`` (Wilson CI + win-rate gates).
+
+**Self-play / league** — ``SelfPlayEnv`` + :class:`catanatron.gym.colonist_training.CheckpointLeague`.
+
+**Learned players** — CLI ``L:policy.zip`` (SB3), ``T:policy.pt`` (Torch BC + meta).
+
 ## Configuration
 
 You can also configure what map to use, how many vps to win, among other variables in the environment,

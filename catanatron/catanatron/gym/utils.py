@@ -5,6 +5,20 @@ import numpy as np
 from catanatron.state_functions import get_actual_victory_points
 from catanatron.utils import ensure_dir
 
+
+def infer_vps_cap(game):
+    """
+    Victory-point ceiling used when scaling returns to match game length.
+
+    Uses ``game.vps_to_win`` when present (all current ``Game`` instances set it).
+    Falls back to ``10`` for backward compatibility with older pickled games.
+    """
+    vps = getattr(game, "vps_to_win", None)
+    if vps is not None:
+        return int(vps)
+    return 10
+
+
 # DISCOUNT_FACTOR = 0 would mean only focus on immediate reward. Must be < 1. The closer to 1, the more
 #   important the future is. 0.99 means future is 100 times more important than immediate reward.
 DISCOUNT_FACTOR = 0.99
@@ -95,8 +109,9 @@ def get_tournament_total_return(game, p0_color):
     than 10vps, no matter turns.
     """
     sign = simple_total_return(game, p0_color)
+    cap = infer_vps_cap(game)
     points = get_actual_victory_points(game.state, p0_color)
-    return sign * 1000 + min(points, 10) * 0.9999**game.state.num_turns
+    return sign * 1000 + min(points, cap) * 0.9999**game.state.num_turns
 
 
 def get_victory_points_total_return(game, p0_color):
@@ -107,8 +122,9 @@ def get_victory_points_total_return(game, p0_color):
     # This discount factor (0.9999) ensures a game won in less turns
     #   is better, and still a Game with 9vps is less than 10vps,
     #   no matter turns.
+    cap = infer_vps_cap(game)
     points = get_actual_victory_points(game.state, p0_color)
-    episode_return = min(points, 10)
+    episode_return = min(points, cap)
     return episode_return * 0.9999**game.state.num_turns
 
 

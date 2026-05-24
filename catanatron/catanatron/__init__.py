@@ -8,6 +8,7 @@ from catanatron.game import Game, GameAccumulator
 from catanatron.colonist_1v1 import (
     COLONIST_1V1_SETTINGS,
     Colonist1v1Settings,
+    Colonist1v1TrainConfig,
     create_colonist_1v1_game,
 )
 from catanatron.models.player import Player, Color, RandomPlayer

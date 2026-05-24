@@ -71,6 +71,8 @@ class CatanatronEnv(gym.Env):
 
         self.representation = self.config.get("representation", "vector")
         assert self.representation in ["mixed", "vector"]
+        # Use public VP for P0 instead of oracle actual VP (closer to human-visible Colonist).
+        self.human_visible_obs = self.config.get("human_visible_obs", False)
 
         self.enemies = self.config.get("enemies", [RandomPlayer(Color.RED)])
         self.player_colors = tuple([Color.BLUE] + [p.color for p in self.enemies])
@@ -182,7 +184,13 @@ class CatanatronEnv(gym.Env):
         if seed is not None:
             # Ensure map generation uses the same seed as the game.
             random.seed(seed)
-        catan_map = build_map(self.map_type)
+        if self.colonist_1v1:
+            number_placement = self.config.get(
+                "number_placement", COLONIST_1V1_SETTINGS.number_placement
+            )
+            catan_map = build_map(self.map_type, number_placement)
+        else:
+            catan_map = build_map(self.map_type)
         for player in self.players:
             player.reset_state()
         if self.colonist_1v1:
@@ -210,6 +218,12 @@ class CatanatronEnv(gym.Env):
 
     def _get_observation(self) -> Union[np.ndarray, MixedObservation]:
         sample = create_sample(self.game, self.p0.color)
+        if self.human_visible_obs and "P0_ACTUAL_VPS" in sample:
+            from catanatron.state_functions import get_visible_victory_points
+
+            sample["P0_ACTUAL_VPS"] = get_visible_victory_points(
+                self.game.state, self.p0.color
+            )
         if self.representation == "mixed":
             board_tensor = create_board_tensor(
                 self.game, self.p0.color, channels_first=True

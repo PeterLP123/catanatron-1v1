@@ -33,6 +33,19 @@ class Colonist1v1Settings:
 COLONIST_1V1_SETTINGS = Colonist1v1Settings()
 
 
+@dataclass(frozen=True)
+class Colonist1v1TrainConfig:
+    """Minimal defaults for Colonist 1v1 data generation and RL training."""
+
+    map_type: MapType = COLONIST_1V1_SETTINGS.map_type
+    number_placement: NumberPlacement = COLONIST_1V1_SETTINGS.number_placement
+    vps_to_win: int = COLONIST_1V1_SETTINGS.vps_to_win
+    seed: Optional[int] = None
+    # ``catanatron-play`` player strings, e.g. "F,F" or "VP,F"
+    teacher_players: str = "F,F"
+    output_dir: str = "data/colonist_1v1_parquet"
+
+
 def validate_colonist_1v1_players(players: Sequence[Player]) -> None:
     if len(players) != COLONIST_1V1_SETTINGS.num_players:
         raise ValueError(

@@ -1,0 +1,203 @@
+"""Colonist 1v1 gym, eval, league, and learned-player integration tests."""
+
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import gymnasium
+import numpy as np
+import pytest
+
+from catanatron import Color
+from catanatron.colonist_1v1_eval import (
+    DEFAULT_BENCHMARK_GATES,
+    wilson_score_interval,
+    evaluate_matchup,
+)
+from catanatron.gym.colonist_rewards import colonist_shaped_reward
+from catanatron.gym.colonist_training import (
+    CheckpointLeague,
+    resolve_teacher_parquet_paths,
+    warmstart_bc_into_maskable_ppo,
+    write_dataset_metadata,
+)
+from catanatron.gym.envs.catanatron_env import CatanatronEnv
+from catanatron.gym.wrappers.self_play import SelfPlayEnv
+from catanatron.players.weighted_random import WeightedRandomPlayer
+
+
+def test_wilson_interval_bounds():
+    lo, hi = wilson_score_interval(50, 100)
+    assert 0.0 <= lo <= hi <= 1.0
+
+
+def test_colonist_1v1_gym_reset_and_masks():
+    env = gymnasium.make(
+        "catanatron/Catanatron-v0",
+        config={
+            "colonist_1v1": True,
+            "enemies": [WeightedRandomPlayer(Color.RED)],
+            "reward_function": colonist_shaped_reward,
+        },
+    )
+    obs, info = env.reset(seed=42)
+    assert obs.shape[0] > 600
+    assert len(info["valid_actions"]) > 0
+    mask = env.unwrapped.action_masks()
+    assert len(mask) == env.action_space.n
+    assert any(mask)
+    assert env.unwrapped.game.vps_to_win == 15
+    env.close()
+
+
+def test_colonist_shaped_reward_on_env_step():
+    env = gymnasium.make(
+        "catanatron/Catanatron-v0",
+        config={
+            "colonist_1v1": True,
+            "enemies": [WeightedRandomPlayer(Color.RED)],
+            "reward_function": colonist_shaped_reward,
+        },
+    )
+    _, info = env.reset(seed=1)
+    action = info["valid_actions"][0]
+    _, reward, terminated, truncated, _ = env.step(action)
+    assert not terminated or reward in (-1.0, 1.0)
+    assert isinstance(reward, float)
+    env.close()
+
+
+def test_self_play_env_swaps_opponent():
+    base = CatanatronEnv(
+        config={
+            "colonist_1v1": True,
+            "enemies": [WeightedRandomPlayer(Color.RED)],
+        }
+    )
+    opponent = WeightedRandomPlayer(Color.RED)
+    wrapped = SelfPlayEnv(base, opponent=opponent)
+    wrapped.reset(seed=0)
+    assert wrapped.env.unwrapped.enemies[0] is opponent
+
+
+def test_checkpoint_league_register_and_prune(tmp_path):
+    league = CheckpointLeague(tmp_path, max_checkpoints=2)
+    f1 = tmp_path / "a.zip"
+    f2 = tmp_path / "b.zip"
+    f3 = tmp_path / "c.zip"
+    for f in (f1, f2, f3):
+        f.write_bytes(b"zip")
+    league.register(f1, label="a")
+    league.register(f2, label="b")
+    league.register(f3, label="c")
+    paths = league.paths()
+    assert len(paths) == 2
+    assert not (league.league_dir / "a.zip").exists() or "a.zip" not in paths
+
+
+def test_resolve_teacher_parquet_paths_uses_newest_when_meta_present(tmp_path):
+    import json
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    for i in range(5):
+        p = data_dir / f"old_{i}.parquet"
+        p.write_bytes(b"x")
+    for i in range(3):
+        p = data_dir / f"new_{i}.parquet"
+        p.write_bytes(b"x")
+    (data_dir / "dataset_meta.json").write_text(
+        json.dumps({"num_games": 3, "teachers": "F,F"}),
+        encoding="utf-8",
+    )
+    paths = resolve_teacher_parquet_paths(data_dir)
+    assert len(paths) == 3
+    assert all("new_" in p.name for p in paths)
+
+
+def test_write_dataset_metadata(tmp_path):
+    write_dataset_metadata(
+        tmp_path,
+        teachers="F,F",
+        num_games=10,
+        command="test",
+    )
+    meta = tmp_path / "dataset_meta.json"
+    assert meta.exists()
+    assert "F,F" in meta.read_text()
+
+
+def test_evaluate_matchup_mocked():
+    with patch("catanatron.colonist_1v1_eval.play_batch") as pb:
+        pb.return_value = (
+            {Color.BLUE: 7, Color.RED: 3},
+            {Color.BLUE: [10] * 10, Color.RED: [8] * 10},
+            [MagicMock(state=MagicMock(num_turns=50)) for _ in range(10)],
+        )
+        with patch("catanatron.colonist_1v1_eval.parse_cli_string") as pcs:
+            pcs.return_value = [
+                MagicMock(color=Color.BLUE),
+                MagicMock(color=Color.RED),
+            ]
+            r = evaluate_matchup("F", "R", num_games=10, gate=0.5)
+    assert r.wins == 7
+    assert r.win_rate == 0.7
+    assert r.passed_gate is True
+
+
+def test_default_gates_order():
+    assert DEFAULT_BENCHMARK_GATES["R"] > DEFAULT_BENCHMARK_GATES["AB:2"]
+
+
+def test_warmstart_bc_into_ppo_policy():
+    pytest.importorskip("torch")
+    from torch import nn
+
+    obs_dim, n_actions, hidden = 32, 20, 64
+    bc = nn.Sequential(
+        nn.Linear(obs_dim, hidden),
+        nn.ReLU(),
+        nn.Linear(hidden, hidden),
+        nn.ReLU(),
+        nn.Linear(hidden, n_actions),
+    )
+    state = bc.state_dict()
+
+    policy = MagicMock()
+    policy.mlp_extractor.policy_net = nn.Sequential(
+        nn.Linear(obs_dim, hidden),
+        nn.ReLU(),
+        nn.Linear(hidden, hidden),
+        nn.ReLU(),
+    )
+    policy.action_net = nn.Linear(hidden, n_actions)
+
+    n = warmstart_bc_into_maskable_ppo(policy, state)
+    assert n >= 4
+
+
+def test_colonist1v1_player_legal_action():
+    pytest.importorskip("torch")
+    from catanatron.gym.colonist_training import build_mlp_layers
+    from catanatron.players.learned import Colonist1v1Player
+    from catanatron.colonist_1v1 import create_colonist_1v1_game
+    from catanatron.models.player import RandomPlayer
+
+    players = [RandomPlayer(Color.BLUE), RandomPlayer(Color.RED)]
+    game = create_colonist_1v1_game(players, seed=0)
+    while game.winning_color() is None and game.state.current_color() != Color.BLUE:
+        game.play_tick()
+
+    if game.winning_color() is not None:
+        pytest.skip("Game ended before BLUE turn")
+
+    obs_dim = 614
+    n_actions = 332
+    net = build_mlp_layers(obs_dim, n_actions, (64, 64))
+    player = Colonist1v1Player(
+        Color.BLUE,
+        torch_policy=net,
+        map_type="BASE",
+    )
+    playable = game.playable_actions
+    action = player.decide(game, playable)
+    assert action in playable
