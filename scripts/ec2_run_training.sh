@@ -74,4 +74,9 @@ python examples/colonist_1v1_benchmark_report.py \
   --registry "$RUN_DIR/models_index.jsonl" \
   --output "$RUN_DIR/milestone_benchmark.json" || true
 
+if [[ -n "${CATANATRON_S3_BUCKET:-}" ]] && command -v aws >/dev/null 2>&1; then
+  echo "=== $(date -Is) Upload run artifacts -> s3://${CATANATRON_S3_BUCKET}/runs/$(basename "$RUN_DIR")/ ==="
+  "$(dirname "$0")/aws_sync_run.sh" "$RUN_DIR" || echo "WARN: S3 sync failed (run artifacts remain on disk)"
+fi
+
 echo "=== $(date -Is) DONE ==="

@@ -37,6 +37,14 @@ dev = [
     "coverage",
     "coveralls",
 ]
+aws = ["boto3"]
+colonist = [
+    "torch>=2.0",
+    "stable-baselines3>=2.0",
+    "sb3-contrib>=2.0",
+    "tensorboard",
+    "pyarrow",
+]
 
 [project.urls]
 Homepage = "https://github.com/bcollazo/catanatron"

@@ -7,6 +7,9 @@ profile.pstats
 catanatron-venv
 .DS_Store
 
+# Training run artifacts (not source)
+runs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

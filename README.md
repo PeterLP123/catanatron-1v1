@@ -37,8 +37,7 @@ cd catanatron-main
 python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
 
-pip install -e ".[gym,dev]"
-pip install torch stable-baselines3 sb3-contrib tensorboard pyarrow
+pip install -e ".[gym,dev,colonist]"
 ```
 
 Optional terminal UI for the full workflow:
@@ -125,6 +124,8 @@ flowchart LR
 | `run_manifest.json` | Run metadata |
 | `training_events.jsonl` | Phase / eval / promotion events |
 | `final_benchmark.json` | Post-training strength report |
+
+**AWS backup:** deploy a private S3 bucket with [`infra/aws/README.md`](infra/aws/README.md), then sync runs with `./scripts/aws_sync_run.sh runs/<name>` (set `CATANATRON_S3_BUCKET`).
 
 ---
 
