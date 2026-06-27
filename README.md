@@ -33,7 +33,7 @@ Requires **Python 3.11+**.
 
 ```bash
 git clone <your-repo-url>
-cd catanatron-main
+cd catanatron-1v1
 python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
 

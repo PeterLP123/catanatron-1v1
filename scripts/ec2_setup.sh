@@ -15,7 +15,7 @@ sudo apt-get install -y \
 
 if [[ ! -d "$REPO_DIR/.git" ]]; then
   echo "ERROR: Clone repo first, e.g.:"
-  echo "  git clone git@github.com:PeterLP123/catanatron-main.git $REPO_DIR"
+  echo "  git clone git@github.com:PeterLP123/catanatron-1v1.git $REPO_DIR"
   exit 1
 fi
 
