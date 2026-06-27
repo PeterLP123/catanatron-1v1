@@ -16,7 +16,6 @@ from pathlib import Path
 
 from catanatron.colonist_1v1_eval import (
     DEFAULT_BENCHMARK_GATES,
-    DEFAULT_BENCHMARK_OPPONENTS,
     EVAL_PROTOCOLS,
     EvaluationReport,
     append_model_registry,
@@ -38,9 +37,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--opponent",
         default=None,
-        help="Single opponent code (default: run full --benchmark battery).",
+        help="Single opponent code (default: run the selected protocol's battery).",
     )
-    p.add_argument("--num-games", type=int, default=200)
+    p.add_argument(
+        "--num-games",
+        type=int,
+        default=None,
+        help="Games per opponent (default: the selected protocol's value).",
+    )
     p.add_argument(
         "--protocol",
         choices=sorted(EVAL_PROTOCOLS),
@@ -50,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--benchmark",
         action="store_true",
-        help=f"Run full battery: {', '.join(DEFAULT_BENCHMARK_OPPONENTS)}",
+        help="Run the selected protocol's opponent battery (also the default without --opponent).",
     )
     p.add_argument(
         "--gates",
@@ -63,7 +67,6 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Write JSON evaluation report to this path.",
     )
-    p.add_argument("--quiet", action="store_true", default=True)
     p.add_argument(
         "--registry",
         type=Path,
@@ -84,13 +87,11 @@ def main(argv: list[str] | None = None) -> int:
         proto = get_eval_protocol(args.protocol, num_games=args.num_games)
         report = run_benchmark(
             args.agent,
-            opponents=(
-                DEFAULT_BENCHMARK_OPPONENTS if args.benchmark else proto.opponents
-            ),
+            opponents=proto.opponents,
             gates=DEFAULT_BENCHMARK_GATES if args.gates else None,
             num_games=proto.num_games,
             protocol=proto,
-            quiet=args.quiet,
+            quiet=True,
             run_dir=args.run_dir,
             checkpoint_label=args.checkpoint_label,
             training_timesteps=args.training_timesteps,
@@ -107,9 +108,9 @@ def main(argv: list[str] | None = None) -> int:
     result = evaluate_matchup(
         args.agent,
         args.opponent,
-        num_games=args.num_games,
+        num_games=args.num_games or 200,
         gate=DEFAULT_BENCHMARK_GATES.get(args.opponent) if args.gates else None,
-        quiet=args.quiet,
+        quiet=True,
     )
     print(format_matchup_line(result))
     if args.report:

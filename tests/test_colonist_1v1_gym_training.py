@@ -192,6 +192,39 @@ def test_eval_protocol_and_registry_schema(tmp_path):
     assert row["win_rates"]["F"] == 0.1
 
 
+def test_evaluate_cli_uses_protocol_defaults():
+    from examples import colonist_1v1_evaluate
+
+    report = EvaluationReport(agent="F", all_gates_passed=True)
+    with patch.object(
+        colonist_1v1_evaluate, "run_benchmark", return_value=report
+    ) as run:
+        assert colonist_1v1_evaluate.main(["--agent", "F", "--protocol", "fast"]) == 0
+
+    kwargs = run.call_args.kwargs
+    assert kwargs["opponents"] == ("R", "W", "VP", "F")
+    assert kwargs["num_games"] == 50
+
+
+def test_evaluate_cli_allows_game_count_override():
+    from examples import colonist_1v1_evaluate
+
+    report = EvaluationReport(agent="F", all_gates_passed=True)
+    with patch.object(
+        colonist_1v1_evaluate, "run_benchmark", return_value=report
+    ) as run:
+        assert (
+            colonist_1v1_evaluate.main(
+                ["--agent", "F", "--protocol", "milestone", "--num-games", "7"]
+            )
+            == 0
+        )
+
+    kwargs = run.call_args.kwargs
+    assert kwargs["opponents"] == ("R", "W", "VP", "F", "G:25")
+    assert kwargs["num_games"] == 7
+
+
 def test_curriculum_schedule_changes_weights():
     schedule = curriculum_from_name("strong")
     early = schedule.stage_for(0)
