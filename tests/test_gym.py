@@ -149,18 +149,6 @@ def test_mixed_rep():
     assert "numeric" in observation
 
 
-def test_render_rgb_array():
-    env = gymnasium.make(
-        "catanatron/Catanatron-v0", config={"render_mode": "rgb_array"}
-    )
-    env.reset()
-    frame = env.render()
-    assert isinstance(frame, np.ndarray)
-    assert frame.shape == (800, 1000, 3)
-    assert frame.dtype == np.uint8
-    env.close()
-
-
 def test_move_robber_action_in_base_action_array():
     """Test that a specific MOVE_ROBBER action is in the BASE action array for 2 players."""
     player_colors = (Color.BLUE, Color.RED)

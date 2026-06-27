@@ -47,7 +47,7 @@ class MixedObservation(TypedDict):
 
 
 class CatanatronEnv(gym.Env):
-    metadata = {"render_modes": ["rgb_array", "db"], "render_fps": 30}
+    metadata = {"render_modes": []}
 
     def __init__(self, config=None):
         self.dtype = np.float32
@@ -65,10 +65,6 @@ class CatanatronEnv(gym.Env):
             self.map_type = self.config.get("map_type", "BASE")
             self.vps_to_win = self.config.get("vps_to_win", 10)
             self._colonist_game_kwargs = None
-        self.render_mode = self.config.get("render_mode", None)
-        self.render_scale = self.config.get("render_scale", 1.0)
-        self.renderer = None  # Lazy init on first render()
-
         self.representation = self.config.get("representation", "vector")
         assert self.representation in ["mixed", "vector"]
         # Use public VP for P0 instead of oracle actual VP (closer to human-visible Colonist).
@@ -241,33 +237,6 @@ class CatanatronEnv(gym.Env):
             and self.game.state.current_color() != self.p0.color
         ):
             self.game.play_tick()  # will play bot
-
-    def render(self):
-        """Render the game state.
-
-        Returns:
-            np.ndarray: RGB array (height, width, 3) if render_mode is "rgb_array", None otherwise
-        """
-        if self.render_mode == "rgb_array":
-            if self.renderer is None:
-                from catanatron.gym.envs.pygame_renderer import PygameRenderer
-
-                self.renderer = PygameRenderer(render_scale=self.render_scale)
-            return self.renderer.render(self.game)
-        if self.render_mode == "db":
-            from catanatron.web.utils import ensure_link
-
-            link = ensure_link(self.game, get_replay_link=True)
-            if self._is_done():
-                print(f"Replay link: {link}")
-            return None
-        return None
-
-    def close(self):
-        """Clean up resources."""
-        if self.renderer is not None:
-            self.renderer.close()
-            self.renderer = None
 
     def _is_done(self) -> bool:
         return (

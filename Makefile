@@ -1,48 +1,25 @@
-.PHONY: docs
+.PHONY: install test test-1v1 smoke train evaluate tui
 
-clean: clean-build clean-pyc clean-test
+PYTHON ?= python3
+RUN_DIR ?= runs/colonist_1v1
 
-clean-build: check-package
-	rm -fr $(PACKAGE)/build/
-	rm -fr $(PACKAGE)/dist/
-	rm -fr $(PACKAGE)/.eggs/
-	find . -name '*.egg-info' -exec rm -fr {} +
-	find . -name '*.egg' -exec rm -f {} +
+install:
+	$(PYTHON) -m pip install -e ".[dev,gym,colonist,tui]"
 
-clean-pyc:
-	find . -name '*.pyc' -exec rm -f {} +
-	find . -name '*.pyo' -exec rm -f {} +
-	find . -name '__pycache__' -exec rm -fr {} +
-	find . -name '*.egg-info' -exec rm -fr {} +
-	find . -name '*.egg' -exec rm -f {} +
-	rm -fr build/
-	rm -rf dist/
-	rm -fr .pytest_cache/
-	# find . -name '*~' -exec rm -f {} +
+test:
+	$(PYTHON) -m pytest
 
-clean-test:
-	rm -fr .tox/
-	rm -f .coverage
-	rm -fr htmlcov/
+test-1v1:
+	$(PYTHON) -m pytest tests/test_colonist_1v1.py tests/test_colonist_1v1_training.py tests/test_colonist_1v1_gym_training.py
 
-build: clean check-package
-	cd $(PACKAGE) && python setup.py sdist bdist_wheel
-	ls -l $(PACKAGE)/dist
-	twine check $(PACKAGE)/dist/*
+smoke:
+	$(PYTHON) examples/colonist_1v1_train.py --preset smoke --run-dir $(RUN_DIR) --skip-final-eval
 
-upload:
-	twine upload --repository-url https://test.pypi.org/legacy/ $(PACKAGE)/dist/*
+train:
+	$(PYTHON) examples/colonist_1v1_train.py --preset standard --run-dir $(RUN_DIR) --mixed-league --tensorboard
 
-upload-production:
-	twine upload $(PACKAGE)/dist/*
+evaluate:
+	$(PYTHON) examples/colonist_1v1_evaluate.py --agent L:$(RUN_DIR)/colonist_maskable_ppo.zip --benchmark --protocol full --gates --report $(RUN_DIR)/evaluation.json
 
-
-check-package:
-ifndef PACKAGE
-	$(error PACKAGE is undefined)
-endif
-
-
-docs:
-	sphinx-apidoc -o docs/source catanatron/catanatron
-	sphinx-build -b html docs/source/ docs/build/html
+tui:
+	$(PYTHON) examples/colonist_1v1_tui.py --run-dir $(RUN_DIR)

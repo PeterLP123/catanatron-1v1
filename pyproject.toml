@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "catanatron"
+name = "catanatron-1v1"
 version = "3.3.0"
 authors = [{ name = "Bryan Collazo", email = "bcollazo2010@gmail.com" }]
-description = "Fast Settlers of Catan Python Implementation"
+description = "Colonist-style 1v1 Catan simulator and bot training toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
-keywords = ["catan", "settlers of catan", "board game", "python"]
+keywords = ["catan", "colonist", "reinforcement learning", "board game", "python"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
@@ -19,25 +19,14 @@ classifiers = [
 dependencies = ["networkx", "click", "rich"]
 
 [project.optional-dependencies]
-gym = ["gymnasium<=0.29.1", "numpy", "pandas", "fastparquet", "pygame"]
+gym = ["gymnasium<=0.29.1", "numpy", "pandas", "fastparquet"]
 tui = ["textual"]
-web = [
-    "gunicorn",
-    "flask",
-    "flask_cors",
-    "flask_sqlalchemy",
-    "sqlalchemy",
-    "psycopg2-binary",
-]
 dev = [
     "black==25.11.0",
     "pytest",
     "pytest-benchmark",
-    "pytest-watch",
     "coverage",
-    "coveralls",
 ]
-aws = ["boto3"]
 colonist = [
     "torch>=2.0",
     "stable-baselines3>=2.0",
@@ -47,8 +36,9 @@ colonist = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/bcollazo/catanatron"
-Repository = "https://github.com/bcollazo/catanatron"
+Homepage = "https://github.com/PeterLP123/catanatron-1v1"
+Repository = "https://github.com/PeterLP123/catanatron-1v1"
+Upstream = "https://github.com/bcollazo/catanatron"
 
 [project.scripts]
 catanatron-play = "catanatron.cli.play:simulate"

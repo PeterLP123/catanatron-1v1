@@ -305,9 +305,10 @@ def build_eval_command(
 ) -> list[str]:
     return [
         python,
-        "examples/colonist_1v1_benchmark_report.py",
+        "examples/colonist_1v1_evaluate.py",
         "--agent",
         agent,
+        "--benchmark",
         "--protocol",
         protocol,
         "--num-games",
@@ -319,7 +320,7 @@ def build_eval_command(
         label,
         "--registry",
         os.fspath(run_dir / MODEL_REGISTRY_NAME),
-        "--output",
+        "--report",
         os.fspath(run_dir / f"{label}_{protocol}_benchmark.json"),
     ]
 

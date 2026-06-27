@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Train + benchmark when EC2 checkpoint is unavailable (same recipe as ec2_run_training.sh).
+# Reproducible local teacher-data, BC, PPO, and benchmark pipeline.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

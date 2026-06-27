@@ -7,7 +7,7 @@ Recommended teachers (stronger than ``W,W``)::
     python examples/colonist_1v1_generate_data.py --num 5000 --teachers F,F --output data/c1_ff
     python examples/colonist_1v1_generate_data.py --num 2000 --teachers VP,F --output data/c1_vpf
 
-Install extras: ``pip install 'catanatron[gym]'`` (adds ``pyarrow`` for parquet).
+Install the project extras first: ``pip install -e '.[gym,colonist]'``.
 """
 
 from __future__ import annotations

@@ -1,6 +1,11 @@
-from catanatron import Game, RandomPlayer, Color, GameAccumulator
+from typing import Iterable
 
-from examples.custom_player import FooPlayer
+from catanatron import Action, Color, Game, GameAccumulator, Player, RandomPlayer
+
+
+class FirstActionPlayer(Player):
+    def decide(self, game: Game, playable_actions: Iterable[Action]):
+        return next(iter(playable_actions))
 
 
 def test_top_level_imports_work():
@@ -8,7 +13,7 @@ def test_top_level_imports_work():
         pass
 
     players = [
-        FooPlayer(Color.RED),
+        FirstActionPlayer(Color.RED),
         RandomPlayer(Color.BLUE),
         RandomPlayer(Color.WHITE),
         RandomPlayer(Color.ORANGE),

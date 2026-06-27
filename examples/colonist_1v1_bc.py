@@ -2,9 +2,9 @@
 """
 Behavioral cloning on Colonist 1v1 parquet logs (``ParquetDataAccumulator`` output).
 
-**Dependencies** (not in base ``catanatron`` — install explicitly)::
+**Dependencies** (install through this repository's extras)::
 
-    pip install torch pyarrow
+    pip install -e '.[gym,colonist]'
 
 Example::
 

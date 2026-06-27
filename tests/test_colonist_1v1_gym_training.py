@@ -32,6 +32,7 @@ from catanatron.gym.colonist_training import (
 from catanatron.gym.tui_data import (
     build_bc_command,
     build_data_commands,
+    build_eval_command,
     detect_warnings,
     load_registry,
     summarize_run,
@@ -266,6 +267,17 @@ def test_tui_command_builders():
     )
     assert "--data-dir" in bc_cmd
     assert "runs/x/bc.pt" in bc_cmd
+    eval_cmd = build_eval_command(
+        python="python",
+        run_dir=Path("runs/x"),
+        agent="L:runs/x/model.zip",
+        protocol="fast",
+        num_games=20,
+        label="model",
+    )
+    assert eval_cmd[1] == "examples/colonist_1v1_evaluate.py"
+    assert "--benchmark" in eval_cmd
+    assert "--report" in eval_cmd
 
 
 def test_job_runner_streams_and_records_status(tmp_path):
