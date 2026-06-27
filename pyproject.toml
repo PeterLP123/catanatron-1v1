@@ -4,8 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "catanatron-1v1"
-version = "3.3.0"
+version = "0.1.0"
 authors = [{ name = "Bryan Collazo", email = "bcollazo2010@gmail.com" }]
+maintainers = [
+    { name = "Peter Prendergast", email = "79646627+PeterLP123@users.noreply.github.com" },
+]
 description = "Colonist-style 1v1 Catan simulator and bot training toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
