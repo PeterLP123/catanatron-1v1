@@ -1,233 +1,140 @@
-# Catanatron + Colonist.io 1v1 AI
+# Catanatron 1v1
 
-[![Coverage Status](https://coveralls.io/repos/github/bcollazo/catanatron/badge.svg?branch=main)](https://coveralls.io/github/bcollazo/catanatron?branch=main)
-[![Documentation Status](https://readthedocs.org/projects/catanatron/badge/?version=latest)](https://catanatron.readthedocs.io/en/latest/?badge=latest)
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/bcollazo/catanatron/blob/main/examples/Overview.ipynb)
+A focused GPL-3.0 fork of [Catanatron](https://github.com/bcollazo/catanatron) for training and evaluating bots under Colonist-style 1v1 settings.
 
-**Catanatron** is a fast Settlers of Catan simulator and bot framework. **This fork** adds a full pipeline to train and evaluate a **Colonist.io-style 1v1** agent with behavioral cloning (BC), Maskable PPO, checkpoint leagues, and reproducible benchmarks.
+This repository is a local simulator and model-training toolkit. It does not connect to Colonist, automate play on its service, or include Catanatron's former web application.
 
-| Goal | Where to start |
-|------|----------------|
-| Train a Colonist 1v1 bot | [Colonist 1v1 guide](docs/COLONIST_1V1.md) |
-| Run thousands of classic Catan games | `catanatron-play` (below) |
-| Play in the browser | Docker UI (below) |
-| Upstream docs & API | [docs.catanatron.com](https://docs.catanatron.com) |
+## Scope
 
----
+The retained project contains:
 
-## What you get
+- a tested Catan game engine and classical search opponents;
+- a two-player rules preset with a 15-point target, balanced dice, friendly robber, and a 9-card discard limit;
+- a Gymnasium environment with action masks;
+- teacher-data generation and behavioral cloning;
+- MaskablePPO training with curriculum and checkpoint-league opponents;
+- repeatable strength reports and an optional terminal dashboard.
 
-- **Rules-accurate 1v1** — 15 VP, balanced dice, friendly robber (2 visible VP), 9-card discard limit, standard base map.
-- **Teacher data** — Parquet logs from strong built-in bots (`F`, `VP`, …).
-- **BC → PPO** — Warm-start reinforcement learning from imitation.
-- **Self-play league** — Past checkpoints and curriculum opponents mixed during training.
-- **Strength reports** — Win rates vs baselines with Wilson confidence intervals and pass/fail gates.
+The upstream React UI, Flask API, database replay service, experimental package, hosted documentation, deployment files, cloud scripts, and CI workflows are intentionally excluded.
 
----
+## Quick start
 
-## Quick start (Colonist 1v1)
-
-### 1. Install
-
-Requires **Python 3.11+**.
+Python 3.11 or newer is required.
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/PeterLP123/catanatron-1v1.git
 cd catanatron-1v1
-python -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
-
-pip install -e ".[gym,dev,colonist]"
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev,gym,colonist,tui]"
 ```
 
-Optional terminal UI for the full workflow:
+Verify the 1v1 path and run a baseline match:
 
 ```bash
-pip install -e ".[tui]"
+make test-1v1
+catanatron-play --colonist-1v1 --players=F,F --num=10
 ```
 
-### 2. Smoke test (about 1–2 minutes)
+Run a short training smoke test:
 
 ```bash
-python examples/colonist_1v1_train.py --preset smoke --run-dir runs/smoke --skip-final-eval
+make smoke RUN_DIR=runs/smoke
 ```
 
-### 3. Full pipeline (recommended order)
+## Training a bot
+
+The standard workflow is teacher games, behavioral cloning, PPO, then a fixed evaluation protocol.
 
 ```bash
-# A. Teacher games (use strong teachers, not W,W)
-python examples/colonist_1v1_generate_data.py --num 5000 --teachers F,F --output data/c1_ff
+# 1. Generate teacher trajectories.
+python examples/colonist_1v1_generate_data.py \
+  --num 5000 --teachers F,F --output data/c1_ff
 
-# B. Behavioral cloning
-python examples/colonist_1v1_bc.py --data-dir data/c1_ff --epochs 10 --out runs/my_run/bc.pt
+# 2. Pre-train the policy on teacher actions.
+python examples/colonist_1v1_bc.py \
+  --data-dir data/c1_ff --epochs 10 \
+  --out runs/my_bot/bc.pt --run-dir runs/my_bot
 
-# C. PPO with BC warm-start + mixed league
-python examples/colonist_1v1_train.py --preset standard --run-dir runs/my_run \
-  --bc-checkpoint runs/my_run/bc.pt --tensorboard
+# 3. Train with MaskablePPO and mixed league opponents.
+python examples/colonist_1v1_train.py \
+  --preset standard --run-dir runs/my_bot \
+  --bc-checkpoint runs/my_bot/bc.pt --tensorboard
 
-# D. Evaluate final policy
-python examples/colonist_1v1_evaluate.py --agent L:runs/my_run/colonist_maskable_ppo.zip \
-  --benchmark --gates --protocol milestone --report runs/my_run/final_eval.json
+# 4. Evaluate against the milestone opponent battery.
+python examples/colonist_1v1_evaluate.py \
+  --agent L:runs/my_bot/colonist_maskable_ppo.zip \
+  --protocol milestone --gates \
+  --report runs/my_bot/evaluation.json
 ```
 
-For presets, curricula, eval protocols, and run-folder layout, see **[docs/COLONIST_1V1.md](docs/COLONIST_1V1.md)**.
+See [the training guide](docs/TRAINING.md) for presets, artifacts, evaluation caveats, and troubleshooting.
 
-### Training TUI (optional)
+## Rules preset
+
+The preset currently configures exactly two players, 15 victory points, the base map with official number placement, balanced dice, a friendly robber threshold based on visible victory points, and a 9-card discard limit. The implementation is documented in [the rules reference](docs/RULES.md).
+
+Use it through the CLI or Python:
 
 ```bash
-python examples/colonist_1v1_tui.py
-```
-
-Browse runs, launch data generation / BC / PPO / eval, and inspect logs from `run_manifest.json` and `training_events.jsonl`.
-
----
-
-## Colonist 1v1 rules (simulator)
-
-| Setting | Value |
-|---------|--------|
-| Players | 2 |
-| Victory points to win | 15 |
-| Map | Base (`BASE`) |
-| Dice | Balanced |
-| Friendly robber | Yes — cannot steal from opponents with **≤ 2 visible VP** |
-| Discard limit | 9 cards (on 7 or when over limit) |
-
-Enable in code with `colonist_1v1=True` on the Gym env, or on the CLI:
-
-```bash
-catanatron-play --colonist-1v1 --players=F,F --num 100
-```
-
----
-
-## Training pipeline (overview)
-
-```mermaid
-flowchart LR
-  A[Teacher games\nF,F / VP,F] --> B[Parquet logs]
-  B --> C[BC .pt]
-  C --> D[Maskable PPO]
-  D --> E[Checkpoints + league]
-  E --> D
-  D --> F[Benchmark vs R W VP F …]
-```
-
-**Artifacts in `runs/<name>/`:**
-
-| Path | Purpose |
-|------|---------|
-| `checkpoints/ppo_colonist_*_steps.zip` | Periodic SB3 saves |
-| `league/` | Rolling opponent pool for self-play |
-| `colonist_maskable_ppo.zip` | Final trained policy |
-| `bc.pt` + `bc.meta.json` | Behavioral cloning weights |
-| `run_manifest.json` | Run metadata |
-| `training_events.jsonl` | Phase / eval / promotion events |
-| `final_benchmark.json` | Post-training strength report |
-
-**AWS backup:** deploy a private S3 bucket with [`infra/aws/README.md`](infra/aws/README.md), then sync runs with `./scripts/aws_sync_run.sh runs/<name>` (set `CATANATRON_S3_BUCKET`).
-
----
-
-## Bot player codes (`catanatron-play`)
-
-Use these in `--players=...` or in eval as `L:path.zip` / `T:path.pt`.
-
-| Code | Bot | Notes |
-|------|-----|--------|
-| `R` | Random | Weakest baseline |
-| `W` | Weighted random | Favors builds when possible |
-| `VP` | Victory-point greedy | Good mid baseline |
-| `F` | Value function | Strong hand-crafted bot |
-| `G:N` | Greedy playouts | `N` random rollouts per action |
-| `M:N` | MCTS | `N` simulations |
-| `AB:D` | Alpha–beta | Depth `D` |
-| `L:file.zip` | MaskablePPO checkpoint | Learned agent |
-| `T:file.pt` | Torch BC policy | Needs `.meta.json` beside `.pt` |
-
-Colonist 1v1 training expects **exactly two** codes in `--players`, e.g. `F,F`.
-
----
-
-## Classic Catanatron (4-player, CLI, library, UI)
-
-### Command line
-
-```bash
-catanatron-play --players=R,R,R,W --num=100
-catanatron-play --num 100 --output my-data/ --output-format json
-```
-
-### Python
-
-```python
-from catanatron import Game, RandomPlayer, Color
-
-players = [RandomPlayer(c) for c in (Color.RED, Color.BLUE, Color.WHITE, Color.ORANGE)]
-game = Game(players)
-print(game.play())  # winning Color
-```
-
-### Gymnasium (4-player default env)
-
-```bash
-pip install -e ".[gym]"
+catanatron-play --colonist-1v1 --players=F,VP --num=100
 ```
 
 ```python
-import random
-import gymnasium
-import catanatron.gym
+from catanatron import Color, RandomPlayer
+from catanatron.colonist_1v1 import create_colonist_1v1_game
 
-env = gymnasium.make("catanatron/Catanatron-v0")
-observation, info = env.reset()
-for _ in range(1000):
-    action = random.choice(info["valid_actions"])
-    observation, reward, terminated, truncated, info = env.step(action)
-    if terminated or truncated:
-        observation, info = env.reset()
-env.close()
+players = [RandomPlayer(Color.BLUE), RandomPlayer(Color.RED)]
+game = create_colonist_1v1_game(players, seed=42)
+winner = game.play()
 ```
 
-See [catanatron/catanatron/gym/README.md](catanatron/catanatron/gym/README.md) and [docs.catanatron.com](https://docs.catanatron.com).
+## Bot codes
 
-### Web UI (Docker)
+Player specifications are accepted by `catanatron-play` and the evaluation script.
 
-```bash
-docker compose up
-```
+| Code | Player |
+|---|---|
+| `R` | Random baseline |
+| `W` | Build-weighted random baseline |
+| `VP` | Immediate victory-point greedy baseline |
+| `F` | Hand-crafted value-function player |
+| `G:N` | Greedy player using `N` playouts per action |
+| `M:N` | Monte Carlo tree search with `N` simulations |
+| `AB:D` | Alpha-beta search to depth `D` |
+| `L:path.zip` | MaskablePPO checkpoint |
+| `T:path.pt` | Behavioral-cloning checkpoint with adjacent `.meta.json` |
 
-Open [http://localhost:3000](http://localhost:3000).
+Run `catanatron-play --help-players` for the complete built-in list.
 
----
+## Useful commands
 
-## Documentation map
+| Command | Purpose |
+|---|---|
+| `make test` | Run the retained test suite |
+| `make test-1v1` | Run rules, Gym, training, and evaluation tests |
+| `make smoke` | Run the smoke training preset |
+| `make train` | Run the standard preset |
+| `make evaluate` | Evaluate `$(RUN_DIR)/colonist_maskable_ppo.zip` |
+| `make tui` | Open the optional training dashboard |
 
-| Document | Audience |
-|----------|----------|
-| **[docs/COLONIST_1V1.md](docs/COLONIST_1V1.md)** | Colonist training, eval, presets, troubleshooting |
-| [documentation/](documentation/) | GitBook-style guides (install, GUI, ML) |
-| [catanatron/catanatron/gym/README.md](catanatron/catanatron/gym/README.md) | Gym + SB3 masking snippet |
-| [docs/BLOG_POST.md](docs/BLOG_POST.md) | Project motivation and early experiments |
-| [https://docs.catanatron.com](https://docs.catanatron.com) | Upstream reference |
+Generated datasets, checkpoints, TensorBoard events, and run metadata belong under `data/` and `runs/`; both directories are ignored by Git.
 
----
+## Repository map
 
-## Development
+| Path | Responsibility |
+|---|---|
+| `catanatron/catanatron/` | Engine, rules adapter, players, Gym environment, training utilities |
+| `examples/colonist_1v1_*.py` | Data, BC, PPO, evaluation, and TUI entry points |
+| `tests/` | Engine and 1v1 regression tests |
+| `docs/` | Rules, training, and architecture documentation |
+| `scripts/local_strength_eval.sh` | Reproducible local end-to-end pipeline |
 
-```bash
-pip install -e ".[web,gym,dev]"
-coverage run --source=catanatron -m pytest tests/ && coverage report
-```
+For module boundaries and extension points, see [the architecture guide](docs/ARCHITECTURE.md).
 
-Colonist-specific tests: `tests/test_colonist_1v1*.py`.
+## License and attribution
 
----
+This fork remains licensed under GPL-3.0-or-later. Catanatron was created by Bryan Collazo and contributors; fork-specific changes are maintained in this repository. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).
 
-## Contributing & license
-
-Contributing guide: [documentation/contributing.md](documentation/contributing.md).
-
-GPL-3.0-or-later (see upstream [Catanatron](https://github.com/bcollazo/catanatron)).
-
-Background reading: [5 Ways NOT to Build a Catan AI](https://medium.com/@bcollazo2010/5-ways-not-to-build-a-catan-ai-e01bc491af17).
+Colonist is a third-party product and trademark. This project is not affiliated with or endorsed by Colonist.

@@ -1,20 +1,11 @@
-# Documentation index
+# Documentation
 
-## Colonist.io 1v1 (this fork)
+The documentation is deliberately small and specific to this fork.
 
-- **[COLONIST_1V1.md](COLONIST_1V1.md)** — Full training guide: data → BC → PPO → evaluation
-- **[../README.md](../README.md)** — Quick start and command reference
-- **[BLOG_POST.md](BLOG_POST.md)** — Early experiments and benchmark motivation
-- **[RESULTS_LOG.md](RESULTS_LOG.md)** — Historical strength measurements
+- [Rules reference](RULES.md): the exact 1v1 settings implemented by the simulator.
+- [Training and evaluation](TRAINING.md): teacher data, BC, PPO, league play, reports, and troubleshooting.
+- [Architecture](ARCHITECTURE.md): retained modules, data flow, dependency boundaries, and extension points.
+- [Project README](../README.md): installation and the shortest working path.
+- [Upstream notice](../NOTICE.md): provenance, license, and third-party status.
 
-## Upstream Catanatron
-
-- **[../documentation/](../documentation/)** — GitBook: installation, CLI, GUI, core concepts, contributing
-- **[../catanatron/catanatron/gym/README.md](../catanatron/catanatron/gym/README.md)** — Gymnasium environment
-- **[https://docs.catanatron.com](https://docs.catanatron.com)** — Hosted docs
-- **[https://catanatron.readthedocs.io](https://catanatron.readthedocs.io/en/latest/)** — API reference
-
-## Research notes
-
-- [BLOG_POST.md](BLOG_POST.md) — Early experiments and benchmark motivation
-- [RESULTS_LOG.md](RESULTS_LOG.md) — Historical strength measurements
+For generic engine behavior not changed by this fork, consult the [upstream Catanatron source and documentation](https://docs.catanatron.com/). Upstream web, deployment, and documentation assets are not mirrored here.

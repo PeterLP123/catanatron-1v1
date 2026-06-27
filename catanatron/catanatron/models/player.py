@@ -19,9 +19,8 @@ class Color(Enum):
 class Player:
     """Interface to represent a player's decision logic.
 
-    Formulated as a class (instead of a function) so that players
-    can have an initialization that can later be serialized to
-    the database via pickle.
+    Formulated as a class rather than a function so players can keep
+    configuration and search or model state between decisions.
     """
 
     def __init__(self, color, is_bot=True):
