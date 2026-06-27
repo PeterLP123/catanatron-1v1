@@ -9,7 +9,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from catanatron.state_functions import get_actual_victory_points, get_visible_victory_points
+from catanatron.state_functions import (
+    get_actual_victory_points,
+    get_visible_victory_points,
+)
 
 if TYPE_CHECKING:
     from catanatron.models.actions import Action

@@ -3,7 +3,10 @@
 from unittest.mock import MagicMock, patch
 
 from catanatron import Color
-from catanatron.gym.colonist_rewards import colonist_shaped_reward, make_colonist_shaped_reward
+from catanatron.gym.colonist_rewards import (
+    colonist_shaped_reward,
+    make_colonist_shaped_reward,
+)
 from catanatron.gym.utils import (
     get_tournament_total_return,
     get_victory_points_total_return,

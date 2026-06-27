@@ -58,9 +58,7 @@ def main(argv: list[str] | None = None) -> None:
     tracker = (
         TrainingRunTracker(args.run_dir, command=["colonist_1v1_bc.py", *argv])
         if args.run_dir and argv is not None
-        else TrainingRunTracker(args.run_dir, command=None)
-        if args.run_dir
-        else None
+        else TrainingRunTracker(args.run_dir, command=None) if args.run_dir else None
     )
     if tracker:
         tracker.phase("bc_training", data_dirs=[str(p) for p in args.data_dir])

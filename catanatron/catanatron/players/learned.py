@@ -42,7 +42,9 @@ class Colonist1v1Player(Player):
     ):
         super().__init__(color)
         if (model is None) == (torch_policy is None):
-            raise ValueError("Provide exactly one of: model= (SB3), torch_policy= (nn.Module)")
+            raise ValueError(
+                "Provide exactly one of: model= (SB3), torch_policy= (nn.Module)"
+            )
 
         self.map_type = map_type
         self.num_players = num_players

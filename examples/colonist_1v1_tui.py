@@ -60,7 +60,9 @@ def build_dashboard(run_dir: Path):
     header = Table.grid(expand=True)
     header.add_column(ratio=1)
     header.add_column(ratio=1)
-    header.add_row(f"[bold cyan]Run[/] {summary.run_id}", f"[bold]Phase[/] {summary.phase}")
+    header.add_row(
+        f"[bold cyan]Run[/] {summary.run_id}", f"[bold]Phase[/] {summary.phase}"
+    )
     header.add_row(
         f"[bold]Preset[/] {summary.preset}",
         f"[bold]Best[/] {summary.best_label} {format_score(summary.best_score)}",
@@ -70,10 +72,14 @@ def build_dashboard(run_dir: Path):
     progress = Table(title="Training Progress", box=box.SIMPLE_HEAVY)
     progress.add_column("Metric")
     progress.add_column("Value", justify="right")
-    progress.add_row("Timesteps", f"{summary.timesteps:,} / {_fmt(summary.target_timesteps)}")
+    progress.add_row(
+        "Timesteps", f"{summary.timesteps:,} / {_fmt(summary.target_timesteps)}"
+    )
     progress.add_row("Progress", f"{summary.progress_ratio:.1%}")
     progress.add_row("Latest score", format_score(summary.latest_score))
-    progress.add_row("Warnings", "; ".join(summary.warnings) if summary.warnings else "none")
+    progress.add_row(
+        "Warnings", "; ".join(summary.warnings) if summary.warnings else "none"
+    )
     layout["progress"].update(Panel(progress, title="Progress"))
 
     models = Table(title="Model Leaderboard", box=box.SIMPLE_HEAVY)
@@ -84,7 +90,10 @@ def build_dashboard(run_dir: Path):
     for row in registry[:12]:
         wins = row.get("win_rates", {})
         models.add_row(
-            str(row.get("checkpoint_label") or Path(str(row.get("checkpoint_path", "-"))).stem),
+            str(
+                row.get("checkpoint_label")
+                or Path(str(row.get("checkpoint_path", "-"))).stem
+            ),
             format_score(row.get("summary", {}).get("weighted_score")),
             *[format_pct(wins.get(opp)) for opp in ("R", "W", "VP", "F")],
         )
@@ -97,8 +106,12 @@ def build_dashboard(run_dir: Path):
     event_table.add_column("Type")
     event_table.add_column("Details")
     for event in events:
-        details = {k: v for k, v in event.items() if k not in {"time", "type", "run_id"}}
-        event_table.add_row(event.get("time", "-"), event.get("type", "-"), str(details)[:120])
+        details = {
+            k: v for k, v in event.items() if k not in {"time", "type", "run_id"}
+        }
+        event_table.add_row(
+            event.get("time", "-"), event.get("type", "-"), str(details)[:120]
+        )
     layout["events"].update(Panel(event_table, title="Event Log"))
     return layout
 
@@ -201,7 +214,9 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
             self.refresh = refresh
             self.repo_root = _repo_root()
             self.python = sys.executable
-            self.runner = JobRunner(run_dir, cwd=self.repo_root, on_log=self._append_log)
+            self.runner = JobRunner(
+                run_dir, cwd=self.repo_root, on_log=self._append_log
+            )
             self._last_run_dirs: list[Path] = []
 
         def compose(self) -> ComposeResult:
@@ -218,7 +233,9 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
                     with Horizontal():
                         with Vertical(classes="card"):
                             yield Label("Run tag")
-                            yield Input(value=f"c1_tui_{int(time.time())}", id="launch-run-tag")
+                            yield Input(
+                                value=f"c1_tui_{int(time.time())}", id="launch-run-tag"
+                            )
                             yield Label("Teacher specs")
                             yield Input(value="F,F VP,F", id="launch-teachers")
                             yield Label("Teacher games per spec")
@@ -228,26 +245,41 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
                         with Vertical(classes="card"):
                             yield Label("Training preset")
                             yield Select(
-                                [("smoke", "smoke"), ("standard", "standard"), ("strong", "strong"), ("overnight", "overnight")],
+                                [
+                                    ("smoke", "smoke"),
+                                    ("standard", "standard"),
+                                    ("strong", "strong"),
+                                    ("overnight", "overnight"),
+                                ],
                                 value="smoke",
                                 id="launch-preset",
                             )
                             yield Label("Curriculum")
                             yield Select(
-                                [("balanced", "balanced"), ("strong", "strong"), ("self_play", "self_play")],
+                                [
+                                    ("balanced", "balanced"),
+                                    ("strong", "strong"),
+                                    ("self_play", "self_play"),
+                                ],
                                 value="balanced",
                                 id="launch-curriculum",
                             )
                             yield Label("Eval protocol")
                             yield Select(
-                                [("fast", "fast"), ("milestone", "milestone"), ("full", "full")],
+                                [
+                                    ("fast", "fast"),
+                                    ("milestone", "milestone"),
+                                    ("full", "full"),
+                                ],
                                 value="fast",
                                 id="launch-eval-protocol",
                             )
                             yield Label("Vector envs")
                             yield Input(value="1", id="launch-n-envs")
                     yield Static(id="launch-command", classes="card")
-                    yield Button("Run Data -> BC -> PPO", id="launch-workflow", variant="success")
+                    yield Button(
+                        "Run Data -> BC -> PPO", id="launch-workflow", variant="success"
+                    )
                 with TabPane("Monitor", id="monitor"):
                     yield Static(id="monitor-hero", classes="hero")
                     yield ProgressBar(total=100, id="progress-bar")
@@ -259,14 +291,25 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
                     yield Static(id="ranking-hero", classes="hero")
                     yield DataTable(id="ranking-table")
                 with TabPane("Evaluate", id="evaluate"):
-                    yield Static("Evaluate an existing checkpoint and append it to the registry.", classes="hero")
+                    yield Static(
+                        "Evaluate an existing checkpoint and append it to the registry.",
+                        classes="hero",
+                    )
                     yield Label("Agent spec")
-                    yield Input(value="", placeholder="L:runs/.../colonist_maskable_ppo.zip", id="eval-agent")
+                    yield Input(
+                        value="",
+                        placeholder="L:runs/.../colonist_maskable_ppo.zip",
+                        id="eval-agent",
+                    )
                     yield Label("Checkpoint label")
                     yield Input(value="manual", id="eval-label")
                     yield Label("Protocol")
                     yield Select(
-                        [("fast", "fast"), ("milestone", "milestone"), ("full", "full")],
+                        [
+                            ("fast", "fast"),
+                            ("milestone", "milestone"),
+                            ("full", "full"),
+                        ],
                         value="fast",
                         id="eval-protocol",
                     )
@@ -319,7 +362,10 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
                 return default
 
         def _launch_values(self) -> dict[str, Any]:
-            run_tag = self.query_one("#launch-run-tag", Input).value.strip() or f"c1_tui_{int(time.time())}"
+            run_tag = (
+                self.query_one("#launch-run-tag", Input).value.strip()
+                or f"c1_tui_{int(time.time())}"
+            )
             teacher_specs = self.query_one("#launch-teachers", Input).value.split()
             run_dir = self.runs_root / run_tag
             data_root = Path("data") / run_tag
@@ -331,7 +377,9 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
                 "epochs": self._parse_int("#launch-epochs", 2),
                 "preset": str(self.query_one("#launch-preset", Select).value),
                 "curriculum": str(self.query_one("#launch-curriculum", Select).value),
-                "eval_protocol": str(self.query_one("#launch-eval-protocol", Select).value),
+                "eval_protocol": str(
+                    self.query_one("#launch-eval-protocol", Select).value
+                ),
                 "n_envs": self._parse_int("#launch-n-envs", 1),
             }
 
@@ -354,7 +402,9 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
                         _shell_quote,
                         build_bc_command(
                             python=self.python,
-                            data_dirs=data_dirs_for_specs(values["data_root"], values["teacher_specs"]),
+                            data_dirs=data_dirs_for_specs(
+                                values["data_root"], values["teacher_specs"]
+                            ),
                             epochs=values["epochs"],
                             run_dir=values["run_dir"],
                         ),
@@ -403,12 +453,16 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
             if event.button.id == "launch-workflow":
                 values = self._launch_values()
                 self.run_dir = values["run_dir"]
-                self.runner = JobRunner(self.run_dir, cwd=self.repo_root, on_log=self._append_log)
+                self.runner = JobRunner(
+                    self.run_dir, cwd=self.repo_root, on_log=self._append_log
+                )
                 self.runner.start("training_workflow", self._workflow_command())
                 self.query_one("#tabs", TabbedContent).active = "logs"
                 self.refresh_data()
             elif event.button.id == "run-eval":
-                self.runner = JobRunner(self.run_dir, cwd=self.repo_root, on_log=self._append_log)
+                self.runner = JobRunner(
+                    self.run_dir, cwd=self.repo_root, on_log=self._append_log
+                )
                 self.runner.start("evaluation", self._eval_command())
                 self.query_one("#tabs", TabbedContent).active = "logs"
             elif event.button.id == "cancel-job":
@@ -418,17 +472,23 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
             try:
                 launch_cmd = " ".join(map(_shell_quote, self._workflow_command()))
                 try:
-                    self.query_one("#launch-command", Static).update(f"[bold]Command[/]\n{launch_cmd}")
+                    self.query_one("#launch-command", Static).update(
+                        f"[bold]Command[/]\n{launch_cmd}"
+                    )
                 except Exception:
                     pass
                 eval_cmd = " ".join(map(_shell_quote, self._eval_command()))
                 try:
-                    self.query_one("#eval-command", Static).update(f"[bold]Command[/]\n{eval_cmd}")
+                    self.query_one("#eval-command", Static).update(
+                        f"[bold]Command[/]\n{eval_cmd}"
+                    )
                 except Exception:
                     pass
             except Exception as exc:
                 try:
-                    self.query_one("#launch-command", Static).update(f"Command preview unavailable: {exc}")
+                    self.query_one("#launch-command", Static).update(
+                        f"Command preview unavailable: {exc}"
+                    )
                 except Exception:
                     pass
 
@@ -449,7 +509,9 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
                 table = self.query_one("#runs-table", DataTable)
             except Exception:
                 return
-            hero.update(f"[bold cyan]Runs root[/] {self.runs_root}  [bold]Found[/] {len(runs)}")
+            hero.update(
+                f"[bold cyan]Runs root[/] {self.runs_root}  [bold]Found[/] {len(runs)}"
+            )
             table.clear(columns=True)
             for col in ("Run", "Phase", "Preset", "Progress", "Best", "Warnings"):
                 table.add_column(col)
@@ -471,14 +533,19 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
                     f"[bold cyan]{s.run_id}[/]  phase=[bold]{s.phase}[/]  "
                     f"best=[bold green]{s.best_label} {format_score(s.best_score)}[/]"
                 )
-                self.query_one("#progress-bar", ProgressBar).progress = int(s.progress_ratio * 100)
+                self.query_one("#progress-bar", ProgressBar).progress = int(
+                    s.progress_ratio * 100
+                )
                 self.query_one("#monitor-progress", Static).update(
                     f"[bold]Timesteps[/] {s.timesteps:,} / {_fmt(s.target_timesteps)}\n"
                     f"[bold]Latest score[/] {format_score(s.latest_score)}\n"
                     f"[bold]Latest event[/] {s.latest_event}\n"
                     f"[bold]Final model[/] {_fmt(s.final_model)}"
                 )
-                warnings = "\n".join(f"[red]WARN[/] {w}" for w in s.warnings) or "[green]No warnings[/]"
+                warnings = (
+                    "\n".join(f"[red]WARN[/] {w}" for w in s.warnings)
+                    or "[green]No warnings[/]"
+                )
                 self.query_one("#monitor-warnings", Static).update(warnings)
             except Exception:
                 return
@@ -504,7 +571,10 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
                 passed = sum(1 for v in gates.values() if v is True)
                 total = len(gates)
                 table.add_row(
-                    str(row.get("checkpoint_label") or Path(str(row.get("checkpoint_path", "-"))).stem),
+                    str(
+                        row.get("checkpoint_label")
+                        or Path(str(row.get("checkpoint_path", "-"))).stem
+                    ),
                     format_score(row.get("summary", {}).get("weighted_score")),
                     *cells,
                     f"{passed}/{total}" if total else "-",
@@ -512,7 +582,10 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
 
         def refresh_ranking(self) -> None:
             rows = load_registry(self.run_dir, limit=500)
-            scores = [float(r.get("summary", {}).get("weighted_score") or 0.0) for r in rows[:30]]
+            scores = [
+                float(r.get("summary", {}).get("weighted_score") or 0.0)
+                for r in rows[:30]
+            ]
             try:
                 self.query_one("#ranking-hero", Static).update(
                     f"[bold]Score trend[/] {sparkline(list(reversed(scores[-20:])))}  "
@@ -522,17 +595,34 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
             except Exception:
                 return
             table.clear(columns=True)
-            for col in ("Rank", "Label", "Protocol", "Step", "Score", "R", "W", "VP", "F", "Report"):
+            for col in (
+                "Rank",
+                "Label",
+                "Protocol",
+                "Step",
+                "Score",
+                "R",
+                "W",
+                "VP",
+                "F",
+                "Report",
+            ):
                 table.add_column(col)
             for i, row in enumerate(rows[:50], start=1):
                 wins = row.get("win_rates", {})
                 table.add_row(
                     str(i),
-                    str(row.get("checkpoint_label") or Path(str(row.get("checkpoint_path", "-"))).stem),
+                    str(
+                        row.get("checkpoint_label")
+                        or Path(str(row.get("checkpoint_path", "-"))).stem
+                    ),
                     str(row.get("protocol") or "-"),
                     str(row.get("training_timesteps") or "-"),
                     format_score(row.get("summary", {}).get("weighted_score")),
-                    *[f"[{win_rate_style(wins.get(opp))}]{format_pct(wins.get(opp))}[/]" for opp in ("R", "W", "VP", "F")],
+                    *[
+                        f"[{win_rate_style(wins.get(opp))}]{format_pct(wins.get(opp))}[/]"
+                        for opp in ("R", "W", "VP", "F")
+                    ],
                     str(row.get("report_path") or "-"),
                 )
 
@@ -566,7 +656,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run-dir", type=Path, default=Path("runs/colonist_1v1"))
     p.add_argument("--runs-root", type=Path, default=Path("runs"))
     p.add_argument("--refresh", type=float, default=2.0)
-    p.add_argument("--once", action="store_true", help="Render one Rich snapshot and exit.")
+    p.add_argument(
+        "--once", action="store_true", help="Render one Rich snapshot and exit."
+    )
     args = p.parse_args(argv)
 
     if args.once:

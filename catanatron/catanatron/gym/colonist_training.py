@@ -69,7 +69,9 @@ def resolve_teacher_parquet_paths(data_dir: Path) -> list[Path]:
     return sorted(paths, key=lambda p: p.stat().st_mtime)
 
 
-def load_teacher_parquet(data_dir: Union[Path, Sequence[Path]], *, progress: bool = True):
+def load_teacher_parquet(
+    data_dir: Union[Path, Sequence[Path]], *, progress: bool = True
+):
     """Load teacher parquet logs from one or more directories into a single DataFrame."""
     import pandas as pd
 
@@ -136,9 +138,7 @@ def warmstart_bc_into_maskable_ppo(policy: Any, bc_state: dict) -> int:
 
     loaded = 0
     pi_linears = [
-        m
-        for m in policy.mlp_extractor.policy_net
-        if isinstance(m, torch.nn.Linear)
+        m for m in policy.mlp_extractor.policy_net if isinstance(m, torch.nn.Linear)
     ]
     for pi_layer, bc_idx in zip(pi_linears, (0, 2)):
         loaded += _copy_linear(pi_layer, str(bc_idx))
@@ -279,22 +279,50 @@ class CurriculumSchedule:
 CURRICULUM_PRESETS: dict[str, CurriculumSchedule] = {
     "balanced": CurriculumSchedule(
         stages=(
-            CurriculumStage(0, league_weight=0.0, teacher_weight=0.65, baseline_weight=0.35),
-            CurriculumStage(100_000, league_weight=0.30, teacher_weight=0.55, baseline_weight=0.15),
-            CurriculumStage(500_000, league_weight=0.55, teacher_weight=0.40, baseline_weight=0.05),
+            CurriculumStage(
+                0, league_weight=0.0, teacher_weight=0.65, baseline_weight=0.35
+            ),
+            CurriculumStage(
+                100_000, league_weight=0.30, teacher_weight=0.55, baseline_weight=0.15
+            ),
+            CurriculumStage(
+                500_000, league_weight=0.55, teacher_weight=0.40, baseline_weight=0.05
+            ),
         )
     ),
     "strong": CurriculumSchedule(
         stages=(
-            CurriculumStage(0, league_weight=0.0, teacher_weight=0.75, baseline_weight=0.25, teacher_codes=("VP", "F")),
-            CurriculumStage(250_000, league_weight=0.35, teacher_weight=0.60, baseline_weight=0.05, teacher_codes=("F", "VP")),
-            CurriculumStage(1_000_000, league_weight=0.60, teacher_weight=0.40, baseline_weight=0.0, teacher_codes=("F", "G:25")),
+            CurriculumStage(
+                0,
+                league_weight=0.0,
+                teacher_weight=0.75,
+                baseline_weight=0.25,
+                teacher_codes=("VP", "F"),
+            ),
+            CurriculumStage(
+                250_000,
+                league_weight=0.35,
+                teacher_weight=0.60,
+                baseline_weight=0.05,
+                teacher_codes=("F", "VP"),
+            ),
+            CurriculumStage(
+                1_000_000,
+                league_weight=0.60,
+                teacher_weight=0.40,
+                baseline_weight=0.0,
+                teacher_codes=("F", "G:25"),
+            ),
         )
     ),
     "self_play": CurriculumSchedule(
         stages=(
-            CurriculumStage(0, league_weight=0.25, teacher_weight=0.55, baseline_weight=0.20),
-            CurriculumStage(250_000, league_weight=0.70, teacher_weight=0.30, baseline_weight=0.0),
+            CurriculumStage(
+                0, league_weight=0.25, teacher_weight=0.55, baseline_weight=0.20
+            ),
+            CurriculumStage(
+                250_000, league_weight=0.70, teacher_weight=0.30, baseline_weight=0.0
+            ),
         )
     ),
 }
@@ -347,7 +375,9 @@ def make_mixed_opponent_factory(
             ckpt = league.sample_path(r)
             if ckpt is not None:
                 if telemetry:
-                    telemetry.event("opponent_sampled", source="league", checkpoint=ckpt)
+                    telemetry.event(
+                        "opponent_sampled", source="league", checkpoint=ckpt
+                    )
                 return load_sb3_player(
                     ckpt,
                     p1_color,
@@ -402,7 +432,10 @@ class TrainingRunTracker:
     ):
         self.run_dir = Path(run_dir)
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        self.run_id = run_id or f"c1_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
+        self.run_id = (
+            run_id
+            or f"c1_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
+        )
         self.manifest_path = self.run_dir / MANIFEST_NAME
         self.events_path = self.run_dir / EVENTS_NAME
         self.registry_path = self.run_dir / MODEL_REGISTRY_NAME
@@ -431,7 +464,9 @@ class TrainingRunTracker:
 
     def write_manifest(self) -> None:
         self._manifest["updated_at"] = utc_now_iso()
-        self.manifest_path.write_text(json.dumps(self._manifest, indent=2, sort_keys=True))
+        self.manifest_path.write_text(
+            json.dumps(self._manifest, indent=2, sort_keys=True)
+        )
 
     def update_manifest(self, **kwargs: Any) -> None:
         self._manifest.update(kwargs)

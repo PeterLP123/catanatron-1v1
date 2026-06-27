@@ -80,7 +80,9 @@ class DiceControllerBalanced:
 
     def reshuffle_weighted_dice_deck(self) -> None:
         standard_dice_deck = self.get_standard_dice_deck()
-        for total_dice_index, dice_pairs_for_total_dice in enumerate(standard_dice_deck):
+        for total_dice_index, dice_pairs_for_total_dice in enumerate(
+            standard_dice_deck
+        ):
             self.weighted_dice_deck[total_dice_index].dice_pairs = (
                 dice_pairs_for_total_dice.dice_pairs.copy()
             )
@@ -155,7 +157,9 @@ class DiceControllerBalanced:
         self.total_sevens_rolled_by_player[player_color] = 0
 
     def _update_seven_rolls(self, player_color: Color) -> None:
-        sevens_rolled_by_player = self.total_sevens_rolled_by_player.get(player_color, 0)
+        sevens_rolled_by_player = self.total_sevens_rolled_by_player.get(
+            player_color, 0
+        )
         self.total_sevens_rolled_by_player[player_color] = sevens_rolled_by_player + 1
 
         if player_color == self.seven_streak_count["player_color"]:
@@ -169,7 +173,9 @@ class DiceControllerBalanced:
         if self.number_of_players < 2:
             return
 
-        streak_adjustment_percentage = self._get_streak_adjustment_constant(player_color)
+        streak_adjustment_percentage = self._get_streak_adjustment_constant(
+            player_color
+        )
         player_sevens_adjustment_percentage = self._get_seven_imbalance_adjustment(
             player_color
         )
@@ -185,9 +191,9 @@ class DiceControllerBalanced:
         )
 
         seven_index = 7 - self.INDEX_OFFSET
-        self.weighted_dice_deck[seven_index].probability_weighting *= (
-            seven_probability_adjustment
-        )
+        self.weighted_dice_deck[
+            seven_index
+        ].probability_weighting *= seven_probability_adjustment
 
     def _get_streak_adjustment_constant(self, player: Color) -> float:
         is_streak_for_or_against_player = (
@@ -222,19 +228,13 @@ class DiceControllerBalanced:
             StandardDiceDeck(2, [(1, 1)]),
             StandardDiceDeck(3, [(1, 2), (2, 1)]),
             StandardDiceDeck(4, [(1, 3), (2, 2), (3, 1)]),
-            StandardDiceDeck(
-                5, [(1, 4), (2, 3), (3, 2), (4, 1)]
-            ),
-            StandardDiceDeck(
-                6, [(1, 5), (2, 4), (3, 3), (4, 2), (5, 1)]
-            ),
+            StandardDiceDeck(5, [(1, 4), (2, 3), (3, 2), (4, 1)]),
+            StandardDiceDeck(6, [(1, 5), (2, 4), (3, 3), (4, 2), (5, 1)]),
             StandardDiceDeck(
                 7,
                 [(1, 6), (2, 5), (3, 4), (4, 3), (5, 2), (6, 1)],
             ),
-            StandardDiceDeck(
-                8, [(2, 6), (3, 5), (4, 4), (5, 3), (6, 2)]
-            ),
+            StandardDiceDeck(8, [(2, 6), (3, 5), (4, 4), (5, 3), (6, 2)]),
             StandardDiceDeck(9, [(3, 6), (4, 5), (5, 4), (6, 3)]),
             StandardDiceDeck(10, [(4, 6), (5, 5), (6, 4)]),
             StandardDiceDeck(11, [(5, 6), (6, 5)]),

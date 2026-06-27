@@ -17,6 +17,7 @@ from typing import Any, Optional, Sequence
 from catanatron import Color
 from catanatron.cli.cli_players import parse_cli_string
 from catanatron.cli.play import GameConfigOptions, OutputOptions, play_batch
+
 # Minimum win-rate gates for the learned agent (player index 0 / first CLI color).
 DEFAULT_BENCHMARK_GATES: dict[str, float] = {
     "R": 0.90,
@@ -144,11 +145,7 @@ def wilson_score_interval(
     z2 = z * z
     denom = 1.0 + z2 / n
     center = (p + z2 / (2.0 * n)) / denom
-    margin = (
-        z
-        * math.sqrt((p * (1.0 - p) + z2 / (4.0 * n)) / n)
-        / denom
-    )
+    margin = z * math.sqrt((p * (1.0 - p) + z2 / (4.0 * n)) / n) / denom
     return (max(0.0, center - margin), min(1.0, center + margin))
 
 
@@ -326,13 +323,18 @@ def summarize_report(
     gates_passed = sum(1 for m in matchups if m.passed_gate is True)
     raw_weight = sum(weights.get(m.opponent, 0.0) for m in matchups)
     if raw_weight <= 0:
-        weighted_score = sum(m.win_rate for m in matchups) / len(matchups) if matchups else 0.0
+        weighted_score = (
+            sum(m.win_rate for m in matchups) / len(matchups) if matchups else 0.0
+        )
     else:
         # Penalize uncertainty by scoring the midpoint between observed win rate and CI lower bound.
-        weighted_score = sum(
-            weights.get(m.opponent, 0.0) * ((m.win_rate + m.wilson_low) / 2.0)
-            for m in matchups
-        ) / raw_weight
+        weighted_score = (
+            sum(
+                weights.get(m.opponent, 0.0) * ((m.win_rate + m.wilson_low) / 2.0)
+                for m in matchups
+            )
+            / raw_weight
+        )
     return {
         "gates_passed_count": gates_passed,
         "gates_total": gates_total,
@@ -363,7 +365,9 @@ def run_benchmark(
     metadata: Optional[dict[str, Any]] = None,
 ) -> EvaluationReport:
     """Run the full opponent battery and apply optional win-rate gates."""
-    proto = protocol if isinstance(protocol, EvalProtocol) else get_eval_protocol(protocol)
+    proto = (
+        protocol if isinstance(protocol, EvalProtocol) else get_eval_protocol(protocol)
+    )
     if opponents is None:
         opponents = proto.opponents
     if num_games is None:
@@ -429,7 +433,9 @@ def report_registry_row(
         "summary": report.summary,
         "win_rates": {m.opponent: m.win_rate for m in report.matchups},
         "wilson_low": {m.opponent: m.wilson_low for m in report.matchups},
-        "gates": {m.opponent: m.passed_gate for m in report.matchups if m.gate is not None},
+        "gates": {
+            m.opponent: m.passed_gate for m in report.matchups if m.gate is not None
+        },
     }
     return row
 

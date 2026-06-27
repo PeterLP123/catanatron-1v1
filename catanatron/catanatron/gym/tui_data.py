@@ -9,7 +9,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence
 
-from catanatron.gym.colonist_training import EVENTS_NAME, MANIFEST_NAME, MODEL_REGISTRY_NAME
+from catanatron.gym.colonist_training import (
+    EVENTS_NAME,
+    MANIFEST_NAME,
+    MODEL_REGISTRY_NAME,
+)
 
 
 OPPONENT_COLUMNS: tuple[str, ...] = ("R", "W", "VP", "F", "G:25", "M:200", "AB:2")
@@ -73,7 +77,9 @@ def score_value(row: dict[str, Any]) -> float:
     return float(row.get("summary", {}).get("weighted_score") or 0.0)
 
 
-def load_registry(run_dir: Path, *, limit: Optional[int] = None) -> list[dict[str, Any]]:
+def load_registry(
+    run_dir: Path, *, limit: Optional[int] = None
+) -> list[dict[str, Any]]:
     rows = read_jsonl_safe(run_dir / MODEL_REGISTRY_NAME, limit=limit)
     return sorted(rows, key=score_value, reverse=True)
 
@@ -150,8 +156,12 @@ def summarize_run(run_dir: Path) -> RunSummary:
     events = read_jsonl_safe(run_dir / EVENTS_NAME, limit=500)
     registry = load_registry(run_dir)
     training = manifest.get("training", {})
-    latest_ppo = next((e for e in reversed(events) if e.get("type") == "ppo_progress"), {})
-    latest_eval = next((e for e in reversed(events) if e.get("type") == "evaluation"), {})
+    latest_ppo = next(
+        (e for e in reversed(events) if e.get("type") == "ppo_progress"), {}
+    )
+    latest_eval = next(
+        (e for e in reversed(events) if e.get("type") == "evaluation"), {}
+    )
     latest_event = events[-1] if events else {}
     best = best_registry_row(registry)
     warnings = detect_warnings(run_dir, manifest, events, registry)
@@ -206,7 +216,9 @@ def detect_warnings(
         warnings.append("No telemetry events yet")
     if not registry:
         warnings.append("No evaluated models yet")
-    latest_eval = next((e for e in reversed(events) if e.get("type") == "evaluation"), None)
+    latest_eval = next(
+        (e for e in reversed(events) if e.get("type") == "evaluation"), None
+    )
     if latest_eval and latest_eval.get("all_gates_passed") is False:
         warnings.append("Latest eval failed one or more gates")
     active_job = manifest.get("active_job")

@@ -176,8 +176,12 @@ def test_eval_protocol_and_registry_schema(tmp_path):
         agent="L:model.zip",
         meta={"model": {"checkpoint_path": "model.zip"}, "protocol": {"name": "fast"}},
         matchups=[
-            MatchupResult("R", "L:model.zip", 10, 8, 2, 0, 0.8, 0.5, 0.9, 10, 4, 6, 100),
-            MatchupResult("F", "L:model.zip", 10, 1, 9, 0, 0.1, 0.02, 0.4, 4, 10, -6, 80),
+            MatchupResult(
+                "R", "L:model.zip", 10, 8, 2, 0, 0.8, 0.5, 0.9, 10, 4, 6, 100
+            ),
+            MatchupResult(
+                "F", "L:model.zip", 10, 1, 9, 0, 0.1, 0.02, 0.4, 4, 10, -6, 80
+            ),
         ],
     )
     report.summary = summarize_report(report.matchups)

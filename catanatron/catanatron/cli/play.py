@@ -185,7 +185,9 @@ def simulate(
         colonist_1v1,
     )
     if colonist_1v1 and len(players) != 2:
-        return print("Error: --colonist-1v1 requires exactly 2 players (e.g. --players=R,R)")
+        return print(
+            "Error: --colonist-1v1 requires exactly 2 players (e.g. --players=R,R)"
+        )
     play_batch(
         num,
         players,

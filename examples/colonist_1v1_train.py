@@ -39,7 +39,10 @@ from catanatron.colonist_1v1_eval import (
     append_model_registry,
     run_benchmark,
 )
-from catanatron.gym.colonist_rewards import colonist_shaped_reward, make_colonist_shaped_reward
+from catanatron.gym.colonist_rewards import (
+    colonist_shaped_reward,
+    make_colonist_shaped_reward,
+)
 from catanatron.gym.colonist_training import (
     CheckpointLeague,
     MODEL_REGISTRY_NAME,
@@ -199,7 +202,9 @@ class ColonistTrainCallback(BaseCallback):
                 if score > self.best_weighted_score:
                     self.best_weighted_score = score
                     best_path = self._promote(latest, "best_fast")
-                    self.league.register(best_path, label="best_fast", metrics=report.summary)
+                    self.league.register(
+                        best_path, label="best_fast", metrics=report.summary
+                    )
                     if self.tracker:
                         self.tracker.event(
                             "promotion",
@@ -211,7 +216,9 @@ class ColonistTrainCallback(BaseCallback):
                 if f_rate > self.best_f_win_rate:
                     self.best_f_win_rate = f_rate
                     best_path = self._promote(latest, "best_f")
-                    self.league.register(best_path, label="best_f", metrics={"f_win_rate": f_rate})
+                    self.league.register(
+                        best_path, label="best_f", metrics={"f_win_rate": f_rate}
+                    )
                     if self.tracker:
                         self.tracker.event(
                             "promotion",
@@ -357,7 +364,9 @@ def main(argv: list[str] | None = None) -> None:
 
     hidden = list(args.hidden)
     policy_kwargs = dict(net_arch=dict(pi=hidden, vf=hidden))
-    curriculum = None if args.curriculum == "none" else curriculum_from_name(args.curriculum)
+    curriculum = (
+        None if args.curriculum == "none" else curriculum_from_name(args.curriculum)
+    )
     if curriculum and args.teacher_codes:
         from catanatron.gym.colonist_training import CurriculumSchedule, CurriculumStage
 
@@ -384,7 +393,11 @@ def main(argv: list[str] | None = None) -> None:
                     league=league,
                     curriculum=curriculum,
                     step_getter=lambda: step_state["timesteps"],
-                    teacher_codes=tuple(args.teacher_codes) if args.teacher_codes else ("F", "VP", "W"),
+                    teacher_codes=(
+                        tuple(args.teacher_codes)
+                        if args.teacher_codes
+                        else ("F", "VP", "W")
+                    ),
                     telemetry=tracker if rank == 0 else None,
                 )
                 return make_colonist_env(
@@ -476,7 +489,12 @@ def main(argv: list[str] | None = None) -> None:
     step_state["timesteps"] = int(model.num_timesteps)
     model.save(str(final_path))
     league.register(final_path, label="final")
-    tracker.event("checkpoint", path=str(final_path), label="final", timesteps=int(model.num_timesteps))
+    tracker.event(
+        "checkpoint",
+        path=str(final_path),
+        label="final",
+        timesteps=int(model.num_timesteps),
+    )
     tracker.update_manifest(final_model=str(final_path), phase="training_complete")
     print(f"Saved {final_path}")
 

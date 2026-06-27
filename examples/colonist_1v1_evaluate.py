@@ -84,7 +84,9 @@ def main(argv: list[str] | None = None) -> int:
         proto = get_eval_protocol(args.protocol, num_games=args.num_games)
         report = run_benchmark(
             args.agent,
-            opponents=DEFAULT_BENCHMARK_OPPONENTS if args.benchmark else proto.opponents,
+            opponents=(
+                DEFAULT_BENCHMARK_OPPONENTS if args.benchmark else proto.opponents
+            ),
             gates=DEFAULT_BENCHMARK_GATES if args.gates else None,
             num_games=proto.num_games,
             protocol=proto,
