@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-from catanatron import Color
 from catanatron.cli.cli_players import parse_cli_string
 from catanatron.cli.play import GameConfigOptions, OutputOptions, play_batch
 
@@ -167,6 +166,13 @@ class MatchupResult:
     gate: Optional[float] = None
     passed_gate: Optional[bool] = None
     duration_seconds: Optional[float] = None
+    # Per-seat breakdown (None when the matchup was first-seat-only).
+    win_rate_seat0: Optional[float] = None
+    win_rate_seat1: Optional[float] = None
+    vp_diff_seat0: Optional[float] = None
+    vp_diff_seat1: Optional[float] = None
+    games_seat0: Optional[int] = None
+    games_seat1: Optional[int] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -197,26 +203,49 @@ class EvaluationReport:
         path.write_text(json.dumps(self.to_dict(), indent=2))
 
 
-def _agent_color_from_players(players) -> Color:
-    return players[0].color
+@dataclass
+class _SeatStats:
+    """Per-seat aggregates from one batch played with a fixed seat ordering."""
+
+    games: int
+    agent_wins: int
+    opponent_wins: int
+    agent_vp_sum: float
+    opponent_vp_sum: float
+    turns_sum: float
+
+    @property
+    def win_rate(self) -> float:
+        return self.agent_wins / self.games if self.games else 0.0
+
+    @property
+    def vp_diff(self) -> float:
+        if not self.games:
+            return 0.0
+        return (self.agent_vp_sum - self.opponent_vp_sum) / self.games
 
 
-def evaluate_matchup(
+def _play_seat(
     agent_spec: str,
     opponent_spec: str,
     *,
-    num_games: int = 200,
-    colonist_1v1: bool = True,
-    gate: Optional[float] = None,
-    quiet: bool = True,
-) -> MatchupResult:
-    """
-    Play ``num_games`` Colonist 1v1 games with the agent as the first CLI seat.
+    num_games: int,
+    colonist_1v1: bool,
+    quiet: bool,
+    agent_first: bool,
+) -> _SeatStats:
+    """Play ``num_games`` with the agent in a fixed seat and aggregate its results.
 
-    ``agent_spec`` examples: ``L:runs/ppo.zip``, ``F`` (for baseline bots).
+    The first CLI seat moves first, so ``agent_first`` controls whether the agent
+    gets the first-player advantage. The agent's color is read off the parsed
+    players rather than assumed, since swapping the seat swaps the color.
     """
-    started = time.monotonic()
-    players = parse_cli_string(f"{agent_spec},{opponent_spec}")
+    cli = (
+        f"{agent_spec},{opponent_spec}"
+        if agent_first
+        else f"{opponent_spec},{agent_spec}"
+    )
+    players = parse_cli_string(cli)
     game_config = GameConfigOptions.from_cli(
         discard_limit=7,
         vps_to_win=10,
@@ -233,19 +262,84 @@ def evaluate_matchup(
         quiet=quiet,
     )
 
-    agent_color = _agent_color_from_players(players)
-    opponent_color = players[1].color
-
-    completed = len(games)
-    agent_wins = wins.get(agent_color, 0)
-    opponent_wins = wins.get(opponent_color, 0)
-    draws = max(0, completed - agent_wins - opponent_wins)
+    agent_player = players[0] if agent_first else players[1]
+    opponent_player = players[1] if agent_first else players[0]
+    agent_color = agent_player.color
+    opponent_color = opponent_player.color
 
     agent_vps = vps_by_color.get(agent_color, [])
     opp_vps = vps_by_color.get(opponent_color, [])
-    avg_agent_vp = sum(agent_vps) / len(agent_vps) if agent_vps else 0.0
-    avg_opp_vp = sum(opp_vps) / len(opp_vps) if opp_vps else 0.0
-    avg_turns = sum(g.state.num_turns for g in games) / completed if completed else 0.0
+    return _SeatStats(
+        games=len(games),
+        agent_wins=wins.get(agent_color, 0),
+        opponent_wins=wins.get(opponent_color, 0),
+        agent_vp_sum=float(sum(agent_vps)),
+        opponent_vp_sum=float(sum(opp_vps)),
+        turns_sum=float(sum(g.state.num_turns for g in games)),
+    )
+
+
+def evaluate_matchup(
+    agent_spec: str,
+    opponent_spec: str,
+    *,
+    num_games: int = 200,
+    colonist_1v1: bool = True,
+    gate: Optional[float] = None,
+    quiet: bool = True,
+    both_seats: bool = True,
+) -> MatchupResult:
+    """
+    Play ``num_games`` Colonist 1v1 games and report the agent's win rate.
+
+    When ``both_seats`` (the default), ``num_games`` is split between the agent
+    moving first and the agent moving second, so the result is not inflated by
+    first-player advantage; per-seat win rate and VP margin are also recorded.
+    With ``both_seats=False`` the agent only plays the first seat (legacy behavior).
+
+    ``agent_spec`` examples: ``L:runs/ppo.zip``, ``F`` (for baseline bots).
+    """
+    started = time.monotonic()
+    if both_seats:
+        seat0_games = num_games // 2
+        seat1_games = num_games - seat0_games
+    else:
+        seat0_games = num_games
+        seat1_games = 0
+
+    seat0 = _play_seat(
+        agent_spec,
+        opponent_spec,
+        num_games=seat0_games,
+        colonist_1v1=colonist_1v1,
+        quiet=quiet,
+        agent_first=True,
+    )
+    seat1 = (
+        _play_seat(
+            agent_spec,
+            opponent_spec,
+            num_games=seat1_games,
+            colonist_1v1=colonist_1v1,
+            quiet=quiet,
+            agent_first=False,
+        )
+        if seat1_games > 0
+        else None
+    )
+
+    seats = [s for s in (seat0, seat1) if s is not None]
+    completed = sum(s.games for s in seats)
+    agent_wins = sum(s.agent_wins for s in seats)
+    opponent_wins = sum(s.opponent_wins for s in seats)
+    draws = max(0, completed - agent_wins - opponent_wins)
+
+    agent_vp_sum = sum(s.agent_vp_sum for s in seats)
+    opp_vp_sum = sum(s.opponent_vp_sum for s in seats)
+    turns_sum = sum(s.turns_sum for s in seats)
+    avg_agent_vp = agent_vp_sum / completed if completed else 0.0
+    avg_opp_vp = opp_vp_sum / completed if completed else 0.0
+    avg_turns = turns_sum / completed if completed else 0.0
 
     win_rate = agent_wins / completed if completed else 0.0
     lo, hi = wilson_score_interval(agent_wins, completed)
@@ -271,6 +365,12 @@ def evaluate_matchup(
         gate=gate,
         passed_gate=passed,
         duration_seconds=time.monotonic() - started,
+        win_rate_seat0=seat0.win_rate,
+        win_rate_seat1=seat1.win_rate if seat1 is not None else None,
+        vp_diff_seat0=seat0.vp_diff,
+        vp_diff_seat1=seat1.vp_diff if seat1 is not None else None,
+        games_seat0=seat0.games,
+        games_seat1=seat1.games if seat1 is not None else None,
     )
 
 
@@ -284,6 +384,7 @@ def build_eval_meta(
     checkpoint_label: Optional[str] = None,
     training_timesteps: Optional[int] = None,
     command: Optional[Sequence[str]] = None,
+    both_seats: bool = True,
     extra: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     checkpoint_path = checkpoint_path or checkpoint_path_from_agent(agent_spec)
@@ -293,6 +394,7 @@ def build_eval_meta(
         "run_dir": os.fspath(run_dir) if run_dir else None,
         "git_commit": current_git_commit(),
         "command": list(command) if command is not None else sys.argv,
+        "both_seats": both_seats,
         "protocol": {
             "name": protocol.name,
             "description": protocol.description,
@@ -355,6 +457,7 @@ def run_benchmark(
     num_games: Optional[int] = None,
     protocol: str | EvalProtocol = "full",
     colonist_1v1: bool = True,
+    both_seats: bool = True,
     quiet: bool = True,
     eval_kind: str = "manual",
     run_dir: Optional[Path] = None,
@@ -390,6 +493,7 @@ def run_benchmark(
             checkpoint_label=checkpoint_label,
             training_timesteps=training_timesteps,
             command=command,
+            both_seats=both_seats,
             extra=metadata,
         ),
     )
@@ -404,6 +508,7 @@ def run_benchmark(
             colonist_1v1=colonist_1v1,
             gate=gate,
             quiet=quiet,
+            both_seats=both_seats,
         )
         report.matchups.append(result)
         if gate is not None and result.passed_gate is False:
@@ -432,6 +537,8 @@ def report_registry_row(
         "all_gates_passed": report.all_gates_passed,
         "summary": report.summary,
         "win_rates": {m.opponent: m.win_rate for m in report.matchups},
+        "win_rates_seat0": {m.opponent: m.win_rate_seat0 for m in report.matchups},
+        "win_rates_seat1": {m.opponent: m.win_rate_seat1 for m in report.matchups},
         "wilson_low": {m.opponent: m.wilson_low for m in report.matchups},
         "gates": {
             m.opponent: m.passed_gate for m in report.matchups if m.gate is not None
@@ -458,6 +565,9 @@ def format_matchup_line(result: MatchupResult) -> str:
     if result.gate is not None:
         status = "PASS" if result.passed_gate else "FAIL"
         gate_str = f"  gate={result.gate:.0%} [{status}]"
+    seat_str = ""
+    if result.win_rate_seat1 is not None and result.win_rate_seat0 is not None:
+        seat_str = f"  seat[{result.win_rate_seat0:.0%}/{result.win_rate_seat1:.0%}]"
     return (
         f"{result.opponent:8s}  "
         f"{result.wins:4d}/{result.games:<4d}  "
@@ -465,6 +575,7 @@ def format_matchup_line(result: MatchupResult) -> str:
         f"CI=[{result.wilson_low:.1%}, {result.wilson_high:.1%}]  "
         f"vp_diff={result.avg_vp_diff:+.2f}  "
         f"turns={result.avg_turns:.1f}"
+        f"{seat_str}"
         f"{gate_str}"
     )
 

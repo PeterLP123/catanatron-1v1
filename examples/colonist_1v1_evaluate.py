@@ -76,6 +76,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run-dir", type=Path, default=None)
     p.add_argument("--checkpoint-label", default=None)
     p.add_argument("--training-timesteps", type=int, default=None)
+    seat_group = p.add_mutually_exclusive_group()
+    seat_group.add_argument(
+        "--both-seats",
+        dest="both_seats",
+        action="store_true",
+        default=True,
+        help="Split games between the agent moving first and second (default).",
+    )
+    seat_group.add_argument(
+        "--first-seat-only",
+        dest="both_seats",
+        action="store_false",
+        help="Only play the agent in the first seat (legacy, first-player-biased).",
+    )
     args = p.parse_args(argv)
 
     use_benchmark = args.benchmark or (args.opponent is None and args.gates)
@@ -91,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
             gates=DEFAULT_BENCHMARK_GATES if args.gates else None,
             num_games=proto.num_games,
             protocol=proto,
+            both_seats=args.both_seats,
             quiet=True,
             run_dir=args.run_dir,
             checkpoint_label=args.checkpoint_label,
@@ -110,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
         args.opponent,
         num_games=args.num_games or 200,
         gate=DEFAULT_BENCHMARK_GATES.get(args.opponent) if args.gates else None,
+        both_seats=args.both_seats,
         quiet=True,
     )
     print(format_matchup_line(result))

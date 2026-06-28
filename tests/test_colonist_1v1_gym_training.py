@@ -157,7 +157,7 @@ def test_evaluate_matchup_mocked():
                 MagicMock(color=Color.BLUE),
                 MagicMock(color=Color.RED),
             ]
-            r = evaluate_matchup("F", "R", num_games=10, gate=0.5)
+            r = evaluate_matchup("F", "R", num_games=10, gate=0.5, both_seats=False)
     assert r.wins == 7
     assert r.win_rate == 0.7
     assert r.passed_gate is True
