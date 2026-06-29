@@ -1,5 +1,22 @@
 # Plan: toward a robust, human-like 1v1 Catan bot
 
+> **Revised direction — 2026-06-29.** The original Phase 1 below (diverse-teacher BC →
+> PPO → beat F) was executed and **F proved to be a hard wall**: four independent methods
+> all land at ~0% vs `F` (self-play PPO 500k, BC on 5.4M samples, PPO trained *directly*
+> against F, and a model-based 1-ply lookahead with a *learned* value net). The decisive
+> result is the last one — it is mechanically identical to F (same `game.copy/execute`
+> lookahead) and differs only in the value function, yet it loses to F and can't even beat
+> Random. **So the wall is value-function quality at the decision margin, not architecture
+> or scale.** Full evidence + scorecards: [RESULTS_LOG.md](RESULTS_LOG.md).
+>
+> **Decision:** redefine the bar to a *human-like* reactive bot — convincingly beats the
+> weak/random tiers (R/W/VP), plays naturally, and is competitive-but-not-dominant vs the
+> hand-crafted lookahead bots (F/AB). **Beating F is moved to a separate research track**
+> (AlphaZero-style self-play + search with bootstrapped value targets; needs real compute,
+> uncertain payoff) — see "Stretch track" in RESULTS_LOG.md. Phase 0's trustworthy
+> two-seat evaluation stands and underpins the new bar. The phases below are retained for
+> historical context.
+
 ## Context
 
 The strongest existing model (`runs/ec2_proxy_500k`, 500k PPO steps) beats the weak
