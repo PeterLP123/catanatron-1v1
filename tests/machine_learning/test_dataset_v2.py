@@ -6,6 +6,7 @@ from catanatron import Game, Color
 from catanatron.players.weighted_random import WeightedRandomPlayer
 from catanatron.gym.accumulators import ParquetDataAccumulator
 from catanatron.gym.colonist_training import (
+    CANDIDATE_VALUES_COLUMN,
     GAME_ID_COLUMN,
     LEGAL_ACTIONS_COLUMN,
     NUM_LEGAL_COLUMN,
@@ -60,6 +61,61 @@ def test_parquet_records_v2_decision_metadata(tmp_path):
         legal = list(row[LEGAL_ACTIONS_COLUMN])
         assert len(legal) == int(row[NUM_LEGAL_COLUMN])
         assert int(row["ACTION"]) in legal
+
+
+def test_parquet_records_candidate_values_when_scoring(tmp_path):
+    import pandas as pd
+
+    random.seed(0)
+    game = Game([WeightedRandomPlayer(Color.RED), WeightedRandomPlayer(Color.BLUE)])
+    acc = ParquetDataAccumulator(
+        player_colors=game.state.colors,
+        map_type="BASE",
+        output=str(tmp_path),
+        include_board_tensor=False,
+        score_candidates=True,
+    )
+    game.play(accumulators=[acc])
+    df = pd.read_parquet(list(tmp_path.glob("*.parquet"))[0])
+
+    assert CANDIDATE_VALUES_COLUMN in df.columns
+
+    # Genuine choices are scored and aligned with the legal set.
+    import math
+
+    choices = df[df[NUM_LEGAL_COLUMN] > 1]
+    assert len(choices) > 0
+    for _, row in choices.iterrows():
+        cand = list(row[CANDIDATE_VALUES_COLUMN])
+        assert len(cand) == len(list(row[LEGAL_ACTIONS_COLUMN]))
+        assert all(math.isfinite(v) for v in cand)
+    # At least one decision discriminates between its candidates (raw F values
+    # preserve the sub-VP signal that the bounded proxy would erase).
+    assert any(
+        len(set(row[CANDIDATE_VALUES_COLUMN])) > 1 for _, row in choices.iterrows()
+    )
+
+    # Forced decisions are not scored.
+    forced = df[df[NUM_LEGAL_COLUMN] == 1]
+    assert all(len(list(c)) == 0 for c in forced[CANDIDATE_VALUES_COLUMN])
+
+
+def test_parquet_candidate_column_empty_without_scoring(tmp_path):
+    import pandas as pd
+
+    random.seed(0)
+    game = Game([WeightedRandomPlayer(Color.RED), WeightedRandomPlayer(Color.BLUE)])
+    acc = ParquetDataAccumulator(
+        player_colors=game.state.colors,
+        map_type="BASE",
+        output=str(tmp_path),
+        include_board_tensor=False,
+    )
+    game.play(accumulators=[acc])
+    df = pd.read_parquet(list(tmp_path.glob("*.parquet"))[0])
+    # Column exists for a stable schema, but holds only empty lists.
+    assert CANDIDATE_VALUES_COLUMN in df.columns
+    assert all(len(list(c)) == 0 for c in df[CANDIDATE_VALUES_COLUMN])
 
 
 # --- grouped (by-game) split ---------------------------------------------------
@@ -146,3 +202,42 @@ def test_decision_metrics_without_v2_columns_is_plain_accuracy():
     m = decision_metrics(logits, y_true)
     assert m["accuracy"] == 0.5
     assert "legal_choice_accuracy" not in m
+
+
+def test_decision_metrics_reports_regret():
+    # 2 choice rows, action space size 5; candidate values aligned with legal sets.
+    logits = np.array(
+        [
+            [0.0, 9.0, 0.0, 1.0, 0.0],  # legal {1,3}; model picks 1
+            [5.0, 0.0, 0.0, 2.0, 0.0],  # legal {0,3}; model picks 0
+        ]
+    )
+    y_true = np.array([1, 3])
+    num_legal = np.array([2, 2])
+    legal_actions = [[1, 3], [0, 3]]
+    candidate_values = [[0.8, 0.2], [0.4, 0.9]]
+
+    m = decision_metrics(
+        logits,
+        y_true,
+        num_legal=num_legal,
+        legal_actions=legal_actions,
+        candidate_values=candidate_values,
+    )
+    # Normalized per row: row0 picks the best (0.8 of [0.8,0.2]) -> regret 0;
+    # row1 picks the worst (0.4 of [0.4,0.9]) -> regret 1.0. Mean = 0.5.
+    assert m["regret_rows"] == 2
+    assert abs(m["mean_regret"] - 0.5) < 1e-9
+
+
+def test_decision_metrics_skips_regret_for_empty_candidates():
+    logits = np.array([[0.0, 9.0, 0.0, 1.0, 0.0]])
+    y_true = np.array([1])
+    m = decision_metrics(
+        logits,
+        y_true,
+        num_legal=np.array([2]),
+        legal_actions=[[1, 3]],
+        candidate_values=[[]],  # not scored
+    )
+    assert "mean_regret" not in m

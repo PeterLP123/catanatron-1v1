@@ -21,6 +21,7 @@ import numpy as np
 
 from catanatron.gym.colonist_training import (
     BcCheckpointMeta,
+    CANDIDATE_VALUES_COLUMN,
     GAME_ID_COLUMN,
     LEGAL_ACTIONS_COLUMN,
     NUM_LEGAL_COLUMN,
@@ -125,12 +126,25 @@ def main(argv: list[str] | None = None) -> None:
     n_val = int(val_mask.sum())
 
     # Decision-quality columns for honest validation metrics (v2 only).
-    if has_v2:
-        val_action_types = df["ACTION_TYPE"].to_numpy()[val_mask]
-        val_num_legal = df[NUM_LEGAL_COLUMN].to_numpy()[val_mask]
-        val_legal_actions = df[LEGAL_ACTIONS_COLUMN].to_numpy()[val_mask]
-    else:
-        val_action_types = val_num_legal = val_legal_actions = None
+    has_candidates = has_v2 and CANDIDATE_VALUES_COLUMN in df.columns
+
+    def decision_columns(mask):
+        if not has_v2:
+            return None, None, None, None
+        action_types = df["ACTION_TYPE"].to_numpy()[mask]
+        num_legal = df[NUM_LEGAL_COLUMN].to_numpy()[mask]
+        legal_actions = df[LEGAL_ACTIONS_COLUMN].to_numpy()[mask]
+        candidates = (
+            df[CANDIDATE_VALUES_COLUMN].to_numpy()[mask] if has_candidates else None
+        )
+        return action_types, num_legal, legal_actions, candidates
+
+    (
+        val_action_types,
+        val_num_legal,
+        val_legal_actions,
+        val_candidate_values,
+    ) = decision_columns(val_mask)
 
     n_actions = max(args.n_actions, int(y.max().item() + 1))
     obs_dim = x.shape[1]
@@ -148,7 +162,7 @@ def main(argv: list[str] | None = None) -> None:
         args.tensorboard.mkdir(parents=True, exist_ok=True)
         writer = SummaryWriter(log_dir=str(args.tensorboard))
 
-    def evaluate(xb, yb, action_types, num_legal, legal_actions):
+    def evaluate(xb, yb, action_types, num_legal, legal_actions, candidate_values):
         with torch.no_grad():
             logits = net(xb)
             loss = float(loss_fn(logits, yb).item())
@@ -158,6 +172,7 @@ def main(argv: list[str] | None = None) -> None:
             action_types=action_types,
             num_legal=num_legal,
             legal_actions=legal_actions,
+            candidate_values=candidate_values,
         )
         return loss, m
 
@@ -177,7 +192,12 @@ def main(argv: list[str] | None = None) -> None:
 
         if n_val:
             val_loss, val_metrics = evaluate(
-                x_val, y_val, val_action_types, val_num_legal, val_legal_actions
+                x_val,
+                y_val,
+                val_action_types,
+                val_num_legal,
+                val_legal_actions,
+                val_candidate_values,
             )
         else:
             val_loss, val_metrics = train_loss, {}
@@ -187,15 +207,17 @@ def main(argv: list[str] | None = None) -> None:
             "legal_choice_accuracy", val_metrics.get("choice_accuracy")
         )
         choice_str = f"  choice_acc={choice_acc:.4f}" if choice_acc is not None else ""
+        regret = val_metrics.get("mean_regret")
+        regret_str = f"  regret={regret:.4f}" if regret is not None else ""
         print(
             f"epoch {epoch + 1}/{args.epochs}  train_loss={train_loss:.4f}  "
-            f"val_loss={val_loss:.4f}  val_acc={val_acc:.4f}{choice_str}"
+            f"val_loss={val_loss:.4f}  val_acc={val_acc:.4f}{choice_str}{regret_str}"
         )
         if writer is not None:
             writer.add_scalar("loss/train", train_loss, epoch)
             writer.add_scalar("loss/val", val_loss, epoch)
             writer.add_scalar("accuracy/val", val_acc, epoch)
-            for key in ("legal_choice_accuracy", "legal_top3_accuracy"):
+            for key in ("legal_choice_accuracy", "legal_top3_accuracy", "mean_regret"):
                 if key in val_metrics:
                     writer.add_scalar(f"metrics/{key}", val_metrics[key], epoch)
         if tracker:
@@ -214,18 +236,19 @@ def main(argv: list[str] | None = None) -> None:
     # Final held-out test report (by game), if requested.
     if int(test_mask.sum()) > 0:
         test_t = torch.as_tensor(np.flatnonzero(test_mask))
-        if has_v2:
-            test_action_types = df["ACTION_TYPE"].to_numpy()[test_mask]
-            test_num_legal = df[NUM_LEGAL_COLUMN].to_numpy()[test_mask]
-            test_legal_actions = df[LEGAL_ACTIONS_COLUMN].to_numpy()[test_mask]
-        else:
-            test_action_types = test_num_legal = test_legal_actions = None
+        (
+            test_action_types,
+            test_num_legal,
+            test_legal_actions,
+            test_candidate_values,
+        ) = decision_columns(test_mask)
         _, test_metrics = evaluate(
             x[test_t],
             y[test_t],
             test_action_types,
             test_num_legal,
             test_legal_actions,
+            test_candidate_values,
         )
         print(f"test  {test_metrics}")
         if tracker:

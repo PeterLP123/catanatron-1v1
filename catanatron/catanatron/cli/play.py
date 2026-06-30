@@ -89,6 +89,13 @@ class CustomTimeRemainingColumn(TimeRemainingColumn):
     help="Wether to generate 3D Tensor of the Board for CNN Learning (slower) when using --csv or --parquet.",
 )
 @click.option(
+    "--score-candidates",
+    default=False,
+    is_flag=True,
+    help="Label each genuine decision's legal actions with F candidate values "
+    "(parquet only, slower). Enables decision-margin training and regret metrics.",
+)
+@click.option(
     "--config-discard-limit",
     default=7,
     help="Sets Discard Limit to use in games.",
@@ -142,6 +149,7 @@ def simulate(
     output,
     output_format,
     include_board_tensor,
+    score_candidates,
     config_discard_limit,
     config_vps_to_win,
     config_map,
@@ -175,7 +183,9 @@ def simulate(
         return print("--output requires --output-format")
 
     players = parse_cli_string(players)
-    output_options = OutputOptions(output, output_format, include_board_tensor)
+    output_options = OutputOptions(
+        output, output_format, include_board_tensor, score_candidates
+    )
     game_config = GameConfigOptions.from_cli(
         config_discard_limit,
         config_vps_to_win,
@@ -204,6 +214,7 @@ class OutputOptions:
     output: Union[str, None] = None  # path to store files
     output_format: Union[Literal["csv", "parquet", "json"], None] = None
     include_board_tensor: bool = False
+    score_candidates: bool = False
 
 
 @dataclass(frozen=True)
@@ -346,6 +357,7 @@ def play_batch(
                     game_config.map_type,
                     output_options.output,
                     output_options.include_board_tensor,
+                    score_candidates=output_options.score_candidates,
                 )
             )
         elif output_options.output_format == "json":

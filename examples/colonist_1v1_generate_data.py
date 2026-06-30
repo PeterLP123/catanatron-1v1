@@ -41,6 +41,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Also store flattened board tensors (slower).",
     )
+    p.add_argument(
+        "--score-candidates",
+        action="store_true",
+        help="Label each genuine decision's legal actions with F candidate "
+        "values (parquet only, slower). Enables regret metrics and value targets.",
+    )
     args = p.parse_args(argv)
     output_dir = Path(args.output)
     touch_run_marker(output_dir)
@@ -67,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.include_board_tensor:
         cmd.append("--include-board-tensor")
+    if args.score_candidates:
+        cmd.append("--score-candidates")
 
     print("Running:", " ".join(cmd))
     rc = subprocess.call(cmd)

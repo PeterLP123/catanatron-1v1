@@ -36,6 +36,8 @@ class ReinforcementLearningAccumulator(GameAccumulator):
             "TOURNAMENT_RETURN": get_tournament_total_return,
             "VICTORY_POINTS_RETURN": get_victory_points_total_return,
         },
+        score_candidates=False,
+        value_fn_name="base_fn",
     ):
         self.player_colors = player_colors
         self.map_type = map_type
@@ -43,6 +45,11 @@ class ReinforcementLearningAccumulator(GameAccumulator):
         # TODO: Generalize to "rewards_fn" that can yield intermediary rewards
         #   while still rewarding big on terminal states.
         self.total_return_fns = total_return_fns
+        # When set, label each genuine decision's legal actions with their F
+        # candidate values (Phase 02 "train on real choices"). Expensive, so off
+        # by default. Stored as plain config so the accumulator stays picklable.
+        self.score_candidates = bool(score_candidates)
+        self.value_fn_name = value_fn_name
         # Lazily-built {(action_type, value): action_index} map, used to record
         # the legal-action set per decision (dataset v2 "honest measurement").
         self._action_index = None
@@ -52,15 +59,36 @@ class ReinforcementLearningAccumulator(GameAccumulator):
             actions_array = get_action_array(self.player_colors, self.map_type)
             self._action_index = {pair: i for i, pair in enumerate(actions_array)}
 
-    def _legal_action_indices(self, game):
-        """Action-space indices of the legal actions at this decision point."""
+    def _legal_and_candidates(self, game, color):
+        """Legal action indices and (optionally) their F candidate values.
+
+        Both lists are aligned with ``game.playable_actions`` (skipping any
+        action absent from the action map), so ``CANDIDATE_VALUES[i]`` is the
+        value of ``LEGAL_ACTIONS[i]``. Candidate values are only computed for
+        genuine choices (more than one legal action) when scoring is enabled.
+        """
         self._ensure_action_index()
-        indices = []
-        for action in game.playable_actions:
+        playable = game.playable_actions
+        score = self.score_candidates and len(playable) > 1
+        value_fn = None
+        if score:
+            from catanatron.players.leaf_evaluation import (
+                action_value,
+                make_f_value_fn,
+            )
+
+            value_fn = make_f_value_fn(self.value_fn_name)
+
+        legal_indices = []
+        cand_values = []
+        for action in playable:
             idx = self._action_index.get((action.action_type, action.value))
-            if idx is not None:
-                indices.append(idx)
-        return indices
+            if idx is None:
+                continue
+            legal_indices.append(idx)
+            if score:
+                cand_values.append(action_value(game, action, color, value_fn))
+        return legal_indices, cand_values
 
     def before(self, game):
         self.data = {
@@ -75,6 +103,7 @@ class ReinforcementLearningAccumulator(GameAccumulator):
             "phases": [],
             "num_legal": [],
             "legal_actions": [],
+            "candidate_values": [],
         }
         if self.include_board_tensor:
             self.data["board_tensors"] = []
@@ -95,12 +124,15 @@ class ReinforcementLearningAccumulator(GameAccumulator):
         # Dataset v2: record who decided, in which phase, and over how many legal
         # actions, so downstream training can split by game, filter forced
         # decisions, and score against the legal candidate set.
-        legal_indices = self._legal_action_indices(game_before_action)
+        legal_indices, cand_values = self._legal_and_candidates(
+            game_before_action, action.color
+        )
         prompt = game_before_action.state.current_prompt
         self.data["game_ids"].append(game_before_action.id)
         self.data["seats"].append(self.player_colors.index(action.color))
         self.data["phases"].append(getattr(prompt, "name", str(prompt)))
         self.data["num_legal"].append(len(game_before_action.playable_actions))
+        self.data["candidate_values"].append(cand_values)
         self.data["legal_actions"].append(legal_indices)
 
         if self.include_board_tensor:
@@ -164,6 +196,8 @@ class ReinforcementLearningAccumulator(GameAccumulator):
             }
         )
         meta_df["LEGAL_ACTIONS"] = self.data["legal_actions"]
+        # Aligned with LEGAL_ACTIONS; empty lists when candidate scoring is off.
+        meta_df["CANDIDATE_VALUES"] = self.data["candidate_values"]
 
         results = {
             "samples_df": samples_df,
@@ -238,8 +272,16 @@ class ParquetDataAccumulator(ReinforcementLearningAccumulator):
         map_type: Literal["BASE", "TOURNAMENT", "MINI"],
         output,
         include_board_tensor=True,
+        score_candidates=False,
+        value_fn_name="base_fn",
     ):
-        super().__init__(player_colors, map_type, include_board_tensor)
+        super().__init__(
+            player_colors,
+            map_type,
+            include_board_tensor,
+            score_candidates=score_candidates,
+            value_fn_name=value_fn_name,
+        )
         self.output = output
 
     def after(self, game):

@@ -4,6 +4,8 @@ from catanatron import Game, Color
 from catanatron.players.weighted_random import WeightedRandomPlayer
 from catanatron.players.value import get_value_fn
 from catanatron.players.leaf_evaluation import (
+    action_value,
+    candidate_values,
     f_leaf_value,
     make_f_value_fn,
     state_signature,
@@ -95,3 +97,35 @@ def test_state_signature_determines_leaf_value():
     b = f_leaf_value(game.copy(), Color.RED, value_fn)
     assert state_signature(game, Color.RED) == state_signature(game.copy(), Color.RED)
     assert a == b
+
+
+def make_choice_1v1(seed=4, max_ticks=200):
+    """A state where the current player has more than one legal action."""
+    random.seed(seed)
+    game = Game([WeightedRandomPlayer(Color.RED), WeightedRandomPlayer(Color.BLUE)])
+    for _ in range(max_ticks):
+        if game.winning_color() is not None:
+            break
+        if len(game.playable_actions) > 1:
+            return game
+        game.play_tick()
+    raise AssertionError("no multi-action decision state found")
+
+
+def test_candidate_values_align_with_legal_actions():
+    import math
+
+    game = make_choice_1v1()
+    color = game.state.current_color()
+    values = candidate_values(game, color)
+    assert len(values) == len(game.playable_actions)
+    assert all(math.isfinite(v) for v in values)
+
+
+def test_action_value_matches_candidate_values_entry():
+    game = make_choice_1v1()
+    color = game.state.current_color()
+    value_fn = make_f_value_fn()
+    values = candidate_values(game, color, value_fn)
+    first = action_value(game, game.playable_actions[0], color, value_fn)
+    assert first == values[0]

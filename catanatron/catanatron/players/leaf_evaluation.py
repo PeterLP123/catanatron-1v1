@@ -83,3 +83,47 @@ def f_leaf_value(game: Game, color: Color, value_fn: Optional[ValueFn] = None) -
     diff = v_me - v_opp
     denom = abs(v_me) + abs(v_opp) + EPSILON
     return 0.5 + 0.5 * (diff / denom)
+
+
+def action_value(
+    game: Game, action, color: Color, value_fn: Optional[ValueFn] = None
+) -> float:
+    """Chance-weighted *raw* F value of playing ``action``, from ``color``'s view.
+
+    This is the value the teacher F itself maximizes (``value_fn(successor,
+    color)``), averaged over chance outcomes with :func:`execute_spectrum`. It is
+    deliberately **not** squashed to ``[0, 1]``: the bounded :func:`f_leaf_value`
+    proxy is dominated by the victory-point weight and collapses same-VP
+    candidates to ~0.5, erasing exactly the decision-margin signal these labels
+    exist to capture. Magnitudes are large and only meaningful *relative to other
+    candidates of the same decision*.
+    """
+    # Imported here to avoid a heavy import at module load; tree_search_utils
+    # pulls in the feature stack.
+    from catanatron.players.tree_search_utils import execute_spectrum
+
+    if value_fn is None:
+        value_fn = make_f_value_fn()
+    outcomes = execute_spectrum(game, action)
+    total = 0.0
+    weighted = 0.0
+    for outcome_game, proba in outcomes:
+        weighted += proba * value_fn(outcome_game, color)
+        total += proba
+    return weighted / total if total > 0 else value_fn(game, color)
+
+
+def candidate_values(
+    game: Game, color: Color, value_fn: Optional[ValueFn] = None
+) -> list:
+    """Raw F value of every legal action, aligned with ``game.playable_actions``.
+
+    Entry ``i`` is the F value (for ``color``) of the position after
+    ``playable_actions[i]``. Used to label teacher decisions with the value of
+    each legal candidate so training can target the decision margin and report
+    regret against the best legal option. Values are comparable only within one
+    decision (see :func:`action_value`).
+    """
+    if value_fn is None:
+        value_fn = make_f_value_fn()
+    return [action_value(game, a, color, value_fn) for a in game.playable_actions]

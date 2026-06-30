@@ -104,6 +104,7 @@ SEAT_COLUMN = "SEAT"
 PHASE_COLUMN = "PHASE"
 NUM_LEGAL_COLUMN = "NUM_LEGAL"
 LEGAL_ACTIONS_COLUMN = "LEGAL_ACTIONS"
+CANDIDATE_VALUES_COLUMN = "CANDIDATE_VALUES"
 
 
 def grouped_split_masks(
@@ -150,6 +151,7 @@ def decision_metrics(
     action_types: Optional[np.ndarray] = None,
     num_legal: Optional[np.ndarray] = None,
     legal_actions: Optional[Sequence] = None,
+    candidate_values: Optional[Sequence] = None,
     topk: Sequence[int] = (1, 3, 5),
 ):
     """Decision-quality metrics that do not reward forced moves.
@@ -159,6 +161,13 @@ def decision_metrics(
     (a legal-masked argmax) and restricted to genuine choices (``NUM_LEGAL > 1``),
     so ROLL/END_TURN-style forced rows cannot inflate the score. Without the v2
     columns it degrades to plain top-1 accuracy.
+
+    When ``candidate_values`` (the raw F value of each legal action, aligned with
+    ``legal_actions``) is supplied, ``mean_regret`` reports how much value the
+    model's legal-masked pick leaves on the table versus the best legal action --
+    the Phase 02 exit-gate metric. Regret is normalized per decision to the value
+    range of that decision's candidates (0 = picked the best, 1 = picked the
+    worst), so it is scale-free and comparable across rows. Lower is better.
     """
     logits = np.asarray(logits)
     y_true = np.asarray(y_true)
@@ -190,6 +199,7 @@ def decision_metrics(
     topk_hits = {k: [] for k in topk}
     masked_correct = []
     per_family_correct: dict[int, list] = {}
+    regrets: list = []
 
     for i in range(n):
         if not choice[i]:
@@ -209,6 +219,17 @@ def decision_metrics(
         if action_types is not None:
             fam = int(action_types[i])
             per_family_correct.setdefault(fam, []).append(is_correct)
+        if candidate_values is not None:
+            cand = candidate_values[i]
+            # Aligned with legal_arr; order[0] is the model's pick position.
+            if cand is not None and len(cand) == len(legal_arr) and len(cand) > 1:
+                cand = np.asarray(cand, dtype=float)
+                value_range = float(cand.max() - cand.min())
+                if value_range > 0:
+                    chosen = float(cand[int(order[0])])
+                    regrets.append((float(cand.max()) - chosen) / value_range)
+                else:
+                    regrets.append(0.0)
 
     if masked_correct:
         metrics["legal_choice_accuracy"] = float(np.mean(masked_correct))
@@ -219,6 +240,9 @@ def decision_metrics(
         metrics["per_action_family_accuracy"] = {
             str(fam): float(np.mean(vals)) for fam, vals in per_family_correct.items()
         }
+    if regrets:
+        metrics["mean_regret"] = float(np.mean(regrets))
+        metrics["regret_rows"] = len(regrets)
     return metrics
 
 
