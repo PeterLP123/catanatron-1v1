@@ -201,3 +201,59 @@ def test_best_action_by_visits_picks_most_visited():
     a0, a1 = game.playable_actions[0], game.playable_actions[1]
     node = _make_node(game.state.current_color(), game, {a0: (1, 3), a1: (1, 20)})
     assert node.best_action_by_visits() == a1
+
+
+def _multi_action_1v1_game(seed=3, max_ticks=200):
+    """A non-terminal state where the current player has more than one option."""
+    random.seed(seed)
+    game = Game([WeightedRandomPlayer(Color.RED), WeightedRandomPlayer(Color.BLUE)])
+    for _ in range(max_ticks):
+        if game.winning_color() is not None:
+            break
+        if len(game.playable_actions) > 1:
+            return game
+        game.play_tick()
+    raise AssertionError("no multi-action decision state found")
+
+
+def test_search_stats_are_recorded():
+    game = _multi_action_1v1_game()
+    player = MCTSPlayer(game.state.current_color(), num_simulations=12)
+    player.decide(game, game.playable_actions)
+
+    stats = player.last_search_stats
+    assert stats is not None
+    assert stats["simulations"] == 12
+    assert stats["leaf_evals"] >= 1
+    assert stats["expansions"] >= 1
+    assert stats["elapsed_s"] >= 0
+    assert stats["nodes_per_s"] >= 0
+
+
+def test_time_budget_runs_more_simulations_than_a_single_count():
+    game = _multi_action_1v1_game()
+
+    count_player = MCTSPlayer(game.state.current_color(), num_simulations=1)
+    count_player.decide(game, game.playable_actions)
+
+    time_player = MCTSPlayer(game.state.current_color(), max_time_ms=100)
+    time_player.decide(game, game.playable_actions)
+
+    assert (
+        time_player.last_search_stats["simulations"]
+        > count_player.last_search_stats["simulations"]
+    )
+    assert time_player.last_search_stats["elapsed_s"] > 0
+
+
+def test_cli_string_params_are_coerced():
+    # CLI passes everything as strings; bool("False") is True, so parsing must
+    # be explicit, and the time budget must come through as a float.
+    player = MCTSPlayer(Color.RED, "5", "False", "base_fn", "25")
+    assert player.num_simulations == 5
+    assert player.prunning is False
+    assert player.max_time_ms == 25.0
+
+    pruned = MCTSPlayer(Color.RED, "5", "True")
+    assert pruned.prunning is True
+    assert pruned.max_time_ms is None

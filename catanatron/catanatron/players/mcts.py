@@ -1,4 +1,5 @@
 import math
+import time
 from collections import defaultdict
 import random
 
@@ -12,6 +13,13 @@ epsilon = 1e-8
 EXP_C = 2**0.5
 
 
+def _as_bool(value):
+    """Coerce CLI strings to bool. ``bool("False")`` is True, so parse explicitly."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
 class MCTSPlayer(Player):
     def __init__(
         self,
@@ -19,14 +27,23 @@ class MCTSPlayer(Player):
         num_simulations=SIMULATIONS,
         prunning=False,
         value_fn_name="base_fn",
+        max_time_ms=None,
     ):
         super().__init__(color)
         self.num_simulations = int(num_simulations)
-        self.prunning = bool(prunning)
+        self.prunning = _as_bool(prunning)
         # Only store picklable config; the F value function is a closure and is
         # built per-decision so the player stays picklable (it can be shipped to
         # multiprocessing workers by other players in the same game).
         self.value_fn_name = value_fn_name
+        # Optional wall-clock budget per decision (ms). When set, search runs
+        # until the budget elapses instead of a fixed simulation count, so
+        # strength can be measured at a fixed latency budget. CLI passes strings.
+        self.max_time_ms = (
+            float(max_time_ms) if max_time_ms not in (None, "", "None") else None
+        )
+        # Profiler output from the most recent decide() (simulations, nodes/sec).
+        self.last_search_stats = None
 
     def _leaf_value_fn(self):
         # Build the F value function once per decision and reuse it as the search
@@ -43,12 +60,34 @@ class MCTSPlayer(Player):
         if len(actions) == 1:
             return actions[0]
 
+        stats = {"expansions": 0, "leaf_evals": 0}
         root = StateNode(
-            self.color, game.copy(), None, self.prunning, self._leaf_value_fn()
+            self.color, game.copy(), None, self.prunning, self._leaf_value_fn(), stats
         )
-        for _ in range(self.num_simulations):
-            root.run_simulation()
 
+        budget_s = self.max_time_ms / 1000.0 if self.max_time_ms else None
+        start = time.perf_counter()
+        simulations = 0
+        while True:
+            root.run_simulation()
+            simulations += 1
+            if budget_s is None:
+                if simulations >= self.num_simulations:
+                    break
+            elif (time.perf_counter() - start) >= budget_s:
+                break
+        elapsed = time.perf_counter() - start
+
+        self.last_search_stats = {
+            "simulations": simulations,
+            "expansions": stats["expansions"],
+            "leaf_evals": stats["leaf_evals"],
+            "elapsed_s": elapsed,
+            "simulations_per_s": simulations / elapsed if elapsed > 0 else float("inf"),
+            "nodes_per_s": (
+                stats["expansions"] / elapsed if elapsed > 0 else float("inf")
+            ),
+        }
         return root.best_action_by_visits()
 
     def __repr__(self):
@@ -56,7 +95,15 @@ class MCTSPlayer(Player):
 
 
 class StateNode:
-    def __init__(self, color, game: Game, parent, prunning=False, leaf_value_fn=None):
+    def __init__(
+        self,
+        color,
+        game: Game,
+        parent,
+        prunning=False,
+        leaf_value_fn=None,
+        stats=None,
+    ):
         self.level = 0 if parent is None else parent.level + 1
         self.color = color  # color of player carrying out MCTS
         self.parent = parent
@@ -66,6 +113,8 @@ class StateNode:
         # Heuristic leaf evaluator, shared down the tree. Falls back to the F
         # value function so standalone StateNodes still evaluate correctly.
         self.leaf_value_fn = leaf_value_fn or (lambda g, c: f_leaf_value(g, c))
+        # Optional shared profiler counters (expansions, leaf_evals).
+        self.stats = stats
 
         self.wins = 0
         self.visits = 0
@@ -92,6 +141,9 @@ class StateNode:
             winner = tmp.game.winning_color()
             value = 1.0 if winner == self.color else 0.0
 
+        if self.stats is not None:
+            self.stats["leaf_evals"] += 1
+
         # backpropagate
         tmp.backpropagate(value)
 
@@ -111,12 +163,19 @@ class StateNode:
                 children[action].append(
                     (
                         StateNode(
-                            self.color, state, self, self.prunning, self.leaf_value_fn
+                            self.color,
+                            state,
+                            self,
+                            self.prunning,
+                            self.leaf_value_fn,
+                            self.stats,
                         ),
                         proba,
                     )
                 )
         self.children = children
+        if self.stats is not None:
+            self.stats["expansions"] += 1
 
     def select(self):
         """Descend into a child StateNode for the in-tree (UCT) policy."""
