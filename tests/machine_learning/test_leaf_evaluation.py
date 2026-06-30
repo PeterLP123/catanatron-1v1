@@ -7,8 +7,11 @@ from catanatron.players.leaf_evaluation import (
     action_value,
     candidate_values,
     f_leaf_value,
+    leaf_win_probability,
     make_f_value_fn,
+    make_position_value_fn,
     state_signature,
+    value_target_components,
 )
 
 
@@ -129,3 +132,59 @@ def test_action_value_matches_candidate_values_entry():
     values = candidate_values(game, color, value_fn)
     first = action_value(game, game.playable_actions[0], color, value_fn)
     assert first == values[0]
+
+
+# --- resolution-preserving leaf win probability --------------------------------
+
+
+def test_leaf_win_probability_within_unit_interval_and_symmetric():
+    game = make_midgame_1v1()
+    v_red = leaf_win_probability(game, Color.RED)
+    v_blue = leaf_win_probability(game, Color.BLUE)
+    assert 0.0 <= v_red <= 1.0 and 0.0 <= v_blue <= 1.0
+    assert abs((v_red + v_blue) - 1.0) < 1e-9
+
+
+def test_leaf_win_probability_terminal_is_exact():
+    game = make_terminal_1v1()
+    winner = game.winning_color()
+    loser = Color.RED if winner == Color.BLUE else Color.BLUE
+    assert leaf_win_probability(game, winner) == 1.0
+    assert leaf_win_probability(game, loser) == 0.0
+
+
+def test_leaf_win_probability_resolves_same_vp_candidates():
+    """The new leaf separates candidates that the bounded proxy collapses to 0.5."""
+    game = make_choice_1v1()
+    color = game.state.current_color()
+    pos_fn = make_position_value_fn()
+
+    leaf_vals = []
+    proxy_vals = []
+    for action in game.playable_actions:
+        successor = game.copy()
+        try:
+            successor.execute(action, validate_action=False)
+        except Exception:
+            continue
+        leaf_vals.append(round(leaf_win_probability(successor, color, pos_fn), 6))
+        proxy_vals.append(round(f_leaf_value(successor, color), 6))
+
+    assert all(0.0 <= v <= 1.0 for v in leaf_vals)
+    # The repaired leaf discriminates between same-VP candidates...
+    assert len(set(leaf_vals)) > 1
+    # ...where the old magnitude-normalized proxy is far flatter.
+    assert len(set(leaf_vals)) >= len(set(proxy_vals))
+
+
+def test_value_target_components_shape():
+    game = make_midgame_1v1()
+    comps = value_target_components(game, Color.RED)
+    assert comps["outcome"] is None  # non-terminal
+    assert -1.0 <= comps["position_advantage"] <= 1.0
+    assert 0.0 <= comps["win_prob"] <= 1.0
+    assert isinstance(comps["vp_margin"], float)
+
+    terminal = make_terminal_1v1()
+    winner = terminal.winning_color()
+    assert value_target_components(terminal, winner)["outcome"] == 1.0

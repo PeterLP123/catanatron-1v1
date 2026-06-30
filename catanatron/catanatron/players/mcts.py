@@ -6,8 +6,8 @@ import random
 from catanatron.game import Game
 from catanatron.models.player import Player
 from catanatron.players.leaf_evaluation import (
-    f_leaf_value,
-    make_f_value_fn,
+    leaf_win_probability,
+    make_position_value_fn,
     state_signature,
 )
 from catanatron.players.tree_search_utils import execute_spectrum, list_prunned_actions
@@ -64,22 +64,22 @@ class MCTSPlayer(Player):
         return state
 
     def _leaf_value_fn(self, stats=None):
-        # Build the F value function once per decision and reuse it as the search
-        # leaf evaluator (replaces random playouts) across all leaves.
-        value_fn = make_f_value_fn(self.value_fn_name)
+        # Build the positional F value function once per decision and reuse it as
+        # the search leaf evaluator (replaces random playouts) across all leaves.
+        pos_value_fn = make_position_value_fn(self.value_fn_name)
         cache = self._leaf_cache
         cap = self._leaf_cache_cap
 
         def evaluate(game, color):
             if cache is None:
-                return f_leaf_value(game, color, value_fn)
+                return leaf_win_probability(game, color, pos_value_fn)
             key = state_signature(game, color)
             cached = cache.get(key)
             if cached is not None:
                 if stats is not None:
                     stats["leaf_cache_hits"] += 1
                 return cached
-            value = f_leaf_value(game, color, value_fn)
+            value = leaf_win_probability(game, color, pos_value_fn)
             if len(cache) < cap:
                 cache[key] = value
             if stats is not None:
@@ -160,8 +160,8 @@ class StateNode:
         self.children = []
         self.prunning = prunning
         # Heuristic leaf evaluator, shared down the tree. Falls back to the F
-        # value function so standalone StateNodes still evaluate correctly.
-        self.leaf_value_fn = leaf_value_fn or (lambda g, c: f_leaf_value(g, c))
+        # win-probability leaf so standalone StateNodes still evaluate correctly.
+        self.leaf_value_fn = leaf_value_fn or (lambda g, c: leaf_win_probability(g, c))
         # Optional shared profiler counters (expansions, leaf_evals).
         self.stats = stats
 

@@ -19,16 +19,122 @@ guaranteed to stay in ``[0, 1]`` because ``|v_me - v_opp| <= |v_me| + |v_opp|``.
 
 from __future__ import annotations
 
+import math
 from typing import Callable, Optional
 
 from catanatron.game import Game
 from catanatron.models.player import Color
 from catanatron.players.value import get_value_fn
+from catanatron.state_functions import player_key
 
 EPSILON = 1e-9
 
 # Type of an F-style value function: (game, color) -> scalar, higher is better.
 ValueFn = Callable[[Game, Color], float]
+
+# Calibration of the leaf win-probability (see leaf_win_probability). The value
+# is sigmoid(W_VP * public_vp_margin + W_POSITION * position_advantage):
+#   - one victory point of lead shifts the logit by W_VP (a strong but not
+#     decisive edge), and
+#   - position_advantage = tanh((pos_me - pos_opp) / POS_SCALE) in (-1, 1) shifts
+#     it by up to W_POSITION, so same-VP candidates stay well separated instead
+#     of all collapsing to 0.5 the way the bounded f_leaf_value proxy does.
+# POS_SCALE (~half the base production weight) is an external, fixed scale so the
+# position signal does not saturate when the opponent's position is near zero
+# (early game), which a magnitude-relative normalization would.
+W_VP = 0.6
+W_POSITION = 1.0
+POS_SCALE = 5e7
+
+
+def make_position_value_fn(
+    value_fn_builder_name: str = "base_fn", params=None
+) -> ValueFn:
+    """Build an F value function with the victory-point term removed.
+
+    The result scores only the *positional* part of F (production, reachability,
+    hand synergy, longest road, dev cards, ...). Used by
+    :func:`leaf_win_probability` so the VP signal can be handled separately and
+    not drown out the sub-VP differences that distinguish same-score candidates.
+    """
+    from catanatron.players.value import (
+        base_fn,
+        CONTENDER_WEIGHTS,
+        DEFAULT_WEIGHTS,
+    )
+
+    if value_fn_builder_name == "contender_fn":
+        weights = dict(params or CONTENDER_WEIGHTS)
+    else:
+        weights = dict(DEFAULT_WEIGHTS)
+        if params:
+            weights.update(params)
+    weights["public_vps"] = 0.0
+    return base_fn(weights)
+
+
+def _public_vps(game: Game, color: Color) -> float:
+    """Public victory points of ``color`` (no hidden VP dev cards)."""
+    key = player_key(game.state, color)
+    return float(game.state.player_state[f"{key}_VICTORY_POINTS"])
+
+
+def value_target_components(
+    game: Game, color: Color, pos_value_fn: Optional[ValueFn] = None
+) -> dict:
+    """The value-target heads for ``color``: outcome, VP margin, F potential.
+
+    Returns a dict with:
+      * ``outcome`` -- 1.0/0.0 at terminal states, else ``None``;
+      * ``vp_margin`` -- public VP lead over the strongest opponent;
+      * ``position_advantage`` -- scale-free F position advantage in ``[-1, 1]``;
+      * ``win_prob`` -- the combined leaf win probability in ``[0, 1]``.
+
+    These are the "outcome + VP margin + F potential" targets the plan calls for;
+    ``win_prob`` is the scalar the search uses as its leaf value.
+    """
+    winner = game.winning_color()
+    opponents = [c for c in game.state.colors if c != color]
+
+    vp_me = _public_vps(game, color)
+    vp_opp = max((_public_vps(game, c) for c in opponents), default=0.0)
+    vp_margin = vp_me - vp_opp
+
+    if pos_value_fn is None:
+        pos_value_fn = make_position_value_fn()
+    pos_me = pos_value_fn(game, color)
+    pos_opp = max((pos_value_fn(game, c) for c in opponents), default=0.0)
+    position_advantage = math.tanh((pos_me - pos_opp) / POS_SCALE)
+
+    if winner is not None:
+        win_prob = 1.0 if winner == color else 0.0
+        outcome = win_prob
+    else:
+        logit = W_VP * vp_margin + W_POSITION * position_advantage
+        win_prob = 1.0 / (1.0 + math.exp(-logit))
+        outcome = None
+
+    return {
+        "outcome": outcome,
+        "vp_margin": vp_margin,
+        "position_advantage": position_advantage,
+        "win_prob": win_prob,
+    }
+
+
+def leaf_win_probability(
+    game: Game, color: Color, pos_value_fn: Optional[ValueFn] = None
+) -> float:
+    """Win-probability leaf value in ``[0, 1]`` that preserves sub-VP resolution.
+
+    Terminal states score an exact 1/0. Non-terminal states combine the public
+    victory-point margin (the dominant, calibrated term) with a scale-free F
+    position advantage, so candidates with the same victory points still spread
+    across the interval instead of collapsing to ~0.5 (the failure mode of the
+    magnitude-normalized :func:`f_leaf_value`). Symmetric: the two perspectives
+    sum to 1.
+    """
+    return value_target_components(game, color, pos_value_fn)["win_prob"]
 
 
 def make_f_value_fn(value_fn_builder_name: str = "base_fn", params=None) -> ValueFn:
