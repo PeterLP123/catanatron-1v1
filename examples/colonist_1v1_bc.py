@@ -29,6 +29,7 @@ from catanatron.gym.colonist_training import (
     build_mlp_layers,
     decision_metrics,
     grouped_split_masks,
+    hard_state_sample_weights,
     load_teacher_parquet,
 )
 
@@ -57,6 +58,13 @@ def main(argv: list[str] | None = None) -> None:
         type=int,
         default=0,
         help="Seed for the grouped (by-game) train/val/test split.",
+    )
+    p.add_argument(
+        "--hard-states",
+        action="store_true",
+        help="Resample the TRAIN split toward genuine decisions (drop forced "
+        "rows, downweight ROLL/END_TURN, oversample strategy families). "
+        "Validation/test stay unfiltered for honest metrics.",
     )
     p.add_argument("--hidden", type=int, nargs=2, default=(512, 512))
     p.add_argument(
@@ -119,7 +127,20 @@ def main(argv: list[str] | None = None) -> None:
         test_mask[shuffled[n_val : n_val + n_test]] = True
         train_mask = ~(val_mask | test_mask)
 
-    train_t = torch.as_tensor(np.flatnonzero(train_mask))
+    train_idx = np.flatnonzero(train_mask)
+    if args.hard_states and has_v2:
+        weights = hard_state_sample_weights(df.iloc[train_idx])
+        if weights.sum() > 0:
+            rng = np.random.default_rng(args.split_seed)
+            probs = weights / weights.sum()
+            n_keep = int((weights > 0).sum())
+            picks = rng.choice(len(train_idx), size=n_keep, replace=True, p=probs)
+            train_idx = train_idx[picks]
+            print(
+                f"hard-states: resampled train split to {n_keep} rows "
+                f"(from {int(train_mask.sum())}) toward genuine decisions."
+            )
+    train_t = torch.as_tensor(train_idx)
     val_t = torch.as_tensor(np.flatnonzero(val_mask))
     x_train, y_train = x[train_t], y[train_t]
     x_val, y_val = x[val_t], y[val_t]

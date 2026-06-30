@@ -246,6 +246,92 @@ def decision_metrics(
     return metrics
 
 
+# Per-decision-family sampling weights for hard-state training. ROLL is always
+# forced (dropped by require_choice anyway); END_TURN is downweighted because it
+# is rarely a strategically rich choice; the genuine strategy families are
+# oversampled. Unlisted families default to 1.0.
+DEFAULT_FAMILY_WEIGHTS = {
+    "ROLL": 0.0,
+    "END_TURN": 0.25,
+    "DISCARD_RESOURCE": 1.0,
+    "MOVE_ROBBER": 2.0,
+    "BUILD_ROAD": 1.5,
+    "BUILD_SETTLEMENT": 2.0,
+    "BUILD_CITY": 2.0,
+    "MARITIME_TRADE": 2.0,
+    "BUY_DEVELOPMENT_CARD": 1.5,
+    "PLAY_KNIGHT_CARD": 1.5,
+    "PLAY_YEAR_OF_PLENTY": 1.5,
+    "PLAY_MONOPOLY": 1.5,
+    "PLAY_ROAD_BUILDING": 1.5,
+}
+
+SETUP_PHASES = ("BUILD_INITIAL_SETTLEMENT", "BUILD_INITIAL_ROAD")
+
+
+def hard_state_sample_weights(
+    df,
+    *,
+    family_weights: Optional[dict] = None,
+    setup_boost: float = 1.5,
+    require_choice: bool = True,
+    require_distinct_candidates: bool = False,
+):
+    """Per-row sampling weights that focus training on real decisions.
+
+    Forced rows (``NUM_LEGAL <= 1``) get weight 0, ROLL/END_TURN are downweighted,
+    and the strategy families (robber, build location, maritime trade, dev-card
+    timing) plus the high-leverage initial-placement phases are oversampled.
+    With ``require_distinct_candidates``, scored rows whose candidates are all
+    equal (no value distinction) are dropped too.
+    """
+    from catanatron.gym.envs.action_space import ACTION_TYPES
+
+    n = len(df)
+    fam_w = {**DEFAULT_FAMILY_WEIGHTS, **(family_weights or {})}
+    name_by_index = {i: at.name for i, at in enumerate(ACTION_TYPES)}
+
+    action_types = df["ACTION_TYPE"].to_numpy()
+    weights = np.array(
+        [fam_w.get(name_by_index.get(int(a)), 1.0) for a in action_types],
+        dtype=float,
+    )
+
+    if setup_boost != 1.0 and PHASE_COLUMN in df.columns:
+        is_setup = np.isin(df[PHASE_COLUMN].to_numpy(), SETUP_PHASES)
+        weights[is_setup] *= setup_boost
+
+    if require_choice and NUM_LEGAL_COLUMN in df.columns:
+        weights[df[NUM_LEGAL_COLUMN].to_numpy() <= 1] = 0.0
+
+    if require_distinct_candidates and CANDIDATE_VALUES_COLUMN in df.columns:
+        cands = df[CANDIDATE_VALUES_COLUMN].to_numpy()
+        for i in range(n):
+            c = cands[i]
+            if c is not None and len(c) > 1 and len({float(v) for v in c}) <= 1:
+                weights[i] = 0.0
+
+    return weights
+
+
+def sample_hard_states(df, *, n: Optional[int] = None, seed: int = 0, **kwargs):
+    """Resample ``df`` rows in proportion to :func:`hard_state_sample_weights`.
+
+    Returns a new DataFrame (sampling with replacement, so strategy families are
+    oversampled). Defaults to as many rows as carry positive weight.
+    """
+    weights = hard_state_sample_weights(df, **kwargs)
+    total = float(weights.sum())
+    if total <= 0:
+        return df.iloc[[]].copy()
+    probs = weights / total
+    if n is None:
+        n = int((weights > 0).sum())
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(len(df), size=n, replace=True, p=probs)
+    return df.iloc[idx].reset_index(drop=True)
+
+
 def build_mlp_layers(
     obs_dim: int,
     n_actions: int,

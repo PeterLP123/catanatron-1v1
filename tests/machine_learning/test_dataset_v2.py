@@ -14,6 +14,8 @@ from catanatron.gym.colonist_training import (
     SEAT_COLUMN,
     decision_metrics,
     grouped_split_masks,
+    hard_state_sample_weights,
+    sample_hard_states,
 )
 
 
@@ -228,6 +230,48 @@ def test_decision_metrics_reports_regret():
     # row1 picks the worst (0.4 of [0.4,0.9]) -> regret 1.0. Mean = 0.5.
     assert m["regret_rows"] == 2
     assert abs(m["mean_regret"] - 0.5) < 1e-9
+
+
+def _family_df():
+    import pandas as pd
+
+    # ROLL(0), END_TURN(17), BUILD_SETTLEMENT(4), MOVE_ROBBER(1), BUILD_SETTLEMENT(4)
+    return pd.DataFrame(
+        {
+            "ACTION_TYPE": [0, 17, 4, 1, 4],
+            "NUM_LEGAL": [1, 3, 5, 4, 1],
+            "PHASE": [
+                "PLAY_TURN",
+                "PLAY_TURN",
+                "BUILD_INITIAL_SETTLEMENT",
+                "MOVE_ROBBER",
+                "BUILD_INITIAL_SETTLEMENT",
+            ],
+        }
+    )
+
+
+def test_hard_state_weights_drop_forced_and_weight_families():
+    w = hard_state_sample_weights(_family_df(), setup_boost=1.5)
+    assert w[0] == 0.0  # ROLL and forced
+    assert w[4] == 0.0  # forced (NUM_LEGAL == 1) despite being a setup settlement
+    assert w[1] == 0.25  # END_TURN downweighted
+    assert w[2] == 2.0 * 1.5  # setup BUILD_SETTLEMENT boosted
+    assert w[3] == 2.0  # MOVE_ROBBER
+    # Strategy decisions weigh more than an END_TURN choice.
+    assert w[2] > w[1] and w[3] > w[1]
+
+
+def test_sample_hard_states_excludes_forced_rows():
+    df = _family_df()
+    sampled = sample_hard_states(df, n=200, seed=1)
+    assert len(sampled) == 200
+    # Only rows with positive weight (indices 1, 2, 3) can appear.
+    assert set(sampled["ACTION_TYPE"].unique()).issubset({17, 4, 1})
+    assert (sampled["NUM_LEGAL"] > 1).all()
+    # Oversampling favors the strategy families over END_TURN.
+    counts = sampled["ACTION_TYPE"].value_counts()
+    assert counts.get(4, 0) > counts.get(17, 0)
 
 
 def test_decision_metrics_skips_regret_for_empty_candidates():
