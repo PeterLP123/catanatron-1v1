@@ -257,3 +257,49 @@ def test_cli_string_params_are_coerced():
     pruned = MCTSPlayer(Color.RED, "5", "True")
     assert pruned.prunning is True
     assert pruned.max_time_ms is None
+
+
+def test_leaf_cache_preserves_search_result():
+    """The transposition cache is a pure memo: results must be identical."""
+    game = _multi_action_1v1_game()
+    color = game.state.current_color()
+
+    random.seed(2024)
+    cached = MCTSPlayer(color, num_simulations=40, use_leaf_cache=True)
+    a_cached = cached.decide(game, game.playable_actions)
+
+    random.seed(2024)
+    uncached = MCTSPlayer(color, num_simulations=40, use_leaf_cache=False)
+    a_uncached = uncached.decide(game, game.playable_actions)
+
+    assert a_cached == a_uncached
+    assert cached.last_search_stats["leaf_cache_misses"] > 0
+    assert uncached.last_search_stats["leaf_cache_hits"] == 0
+    assert uncached.last_search_stats["leaf_cache_misses"] == 0
+
+
+def test_leaf_cache_hits_on_repeated_decision():
+    game = _multi_action_1v1_game()
+    color = game.state.current_color()
+    player = MCTSPlayer(color, num_simulations=40, use_leaf_cache=True)
+
+    random.seed(5)
+    player.decide(game, game.playable_actions)
+    random.seed(5)
+    player.decide(game, game.playable_actions)
+
+    # The persistent cache, primed by the first decision, hits on the second.
+    assert player.last_search_stats["leaf_cache_hits"] > 0
+
+
+def test_player_pickle_drops_leaf_cache():
+    import pickle
+
+    game = _multi_action_1v1_game()
+    player = MCTSPlayer(game.state.current_color(), num_simulations=10)
+    player.decide(game, game.playable_actions)
+    assert len(player._leaf_cache) > 0  # cache populated
+
+    restored = pickle.loads(pickle.dumps(player))
+    assert restored._leaf_cache == {}  # not shipped through pickle
+    assert restored.use_leaf_cache is True

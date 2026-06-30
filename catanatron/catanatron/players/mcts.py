@@ -5,7 +5,11 @@ import random
 
 from catanatron.game import Game
 from catanatron.models.player import Player
-from catanatron.players.leaf_evaluation import f_leaf_value, make_f_value_fn
+from catanatron.players.leaf_evaluation import (
+    f_leaf_value,
+    make_f_value_fn,
+    state_signature,
+)
 from catanatron.players.tree_search_utils import execute_spectrum, list_prunned_actions
 
 SIMULATIONS = 10
@@ -28,6 +32,7 @@ class MCTSPlayer(Player):
         prunning=False,
         value_fn_name="base_fn",
         max_time_ms=None,
+        use_leaf_cache=True,
     ):
         super().__init__(color)
         self.num_simulations = int(num_simulations)
@@ -42,16 +47,44 @@ class MCTSPlayer(Player):
         self.max_time_ms = (
             float(max_time_ms) if max_time_ms not in (None, "", "None") else None
         )
+        # Transposition cache of F leaf evaluations, keyed by state signature.
+        # Values are exact functions of the signature, so cached entries are
+        # always valid; it persists across decisions for a higher hit rate.
+        self.use_leaf_cache = _as_bool(use_leaf_cache)
+        self._leaf_cache = {} if self.use_leaf_cache else None
+        self._leaf_cache_cap = 200_000
         # Profiler output from the most recent decide() (simulations, nodes/sec).
         self.last_search_stats = None
 
-    def _leaf_value_fn(self):
+    def __getstate__(self):
+        # Don't ship the (potentially large) cache to pickling workers; it is a
+        # pure optimization and is rebuilt empty on the other side.
+        state = self.__dict__.copy()
+        state["_leaf_cache"] = {} if self.use_leaf_cache else None
+        return state
+
+    def _leaf_value_fn(self, stats=None):
         # Build the F value function once per decision and reuse it as the search
         # leaf evaluator (replaces random playouts) across all leaves.
         value_fn = make_f_value_fn(self.value_fn_name)
+        cache = self._leaf_cache
+        cap = self._leaf_cache_cap
 
         def evaluate(game, color):
-            return f_leaf_value(game, color, value_fn)
+            if cache is None:
+                return f_leaf_value(game, color, value_fn)
+            key = state_signature(game, color)
+            cached = cache.get(key)
+            if cached is not None:
+                if stats is not None:
+                    stats["leaf_cache_hits"] += 1
+                return cached
+            value = f_leaf_value(game, color, value_fn)
+            if len(cache) < cap:
+                cache[key] = value
+            if stats is not None:
+                stats["leaf_cache_misses"] += 1
+            return value
 
         return evaluate
 
@@ -60,9 +93,19 @@ class MCTSPlayer(Player):
         if len(actions) == 1:
             return actions[0]
 
-        stats = {"expansions": 0, "leaf_evals": 0}
+        stats = {
+            "expansions": 0,
+            "leaf_evals": 0,
+            "leaf_cache_hits": 0,
+            "leaf_cache_misses": 0,
+        }
         root = StateNode(
-            self.color, game.copy(), None, self.prunning, self._leaf_value_fn(), stats
+            self.color,
+            game.copy(),
+            None,
+            self.prunning,
+            self._leaf_value_fn(stats),
+            stats,
         )
 
         budget_s = self.max_time_ms / 1000.0 if self.max_time_ms else None
@@ -78,10 +121,16 @@ class MCTSPlayer(Player):
                 break
         elapsed = time.perf_counter() - start
 
+        lookups = stats["leaf_cache_hits"] + stats["leaf_cache_misses"]
         self.last_search_stats = {
             "simulations": simulations,
             "expansions": stats["expansions"],
             "leaf_evals": stats["leaf_evals"],
+            "leaf_cache_hits": stats["leaf_cache_hits"],
+            "leaf_cache_misses": stats["leaf_cache_misses"],
+            "leaf_cache_hit_rate": (
+                stats["leaf_cache_hits"] / lookups if lookups else 0.0
+            ),
             "elapsed_s": elapsed,
             "simulations_per_s": simulations / elapsed if elapsed > 0 else float("inf"),
             "nodes_per_s": (

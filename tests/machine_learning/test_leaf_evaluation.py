@@ -3,7 +3,11 @@ import random
 from catanatron import Game, Color
 from catanatron.players.weighted_random import WeightedRandomPlayer
 from catanatron.players.value import get_value_fn
-from catanatron.players.leaf_evaluation import f_leaf_value, make_f_value_fn
+from catanatron.players.leaf_evaluation import (
+    f_leaf_value,
+    make_f_value_fn,
+    state_signature,
+)
 
 
 def make_midgame_1v1(seed=42, ticks=25):
@@ -66,3 +70,28 @@ def test_make_f_value_fn_is_callable():
     game = make_midgame_1v1()
     value_fn = make_f_value_fn()
     assert isinstance(value_fn(game, Color.RED), float)
+
+
+def test_state_signature_is_hashable_and_stable_under_copy():
+    game = make_midgame_1v1()
+    sig = state_signature(game, Color.RED)
+    hash(sig)  # must be usable as a cache key
+    assert sig == state_signature(game.copy(), Color.RED)
+
+
+def test_state_signature_differs_by_color_and_state():
+    game = make_midgame_1v1()
+    assert state_signature(game, Color.RED) != state_signature(game, Color.BLUE)
+
+    later = make_midgame_1v1(seed=42, ticks=45)
+    assert state_signature(game, Color.RED) != state_signature(later, Color.RED)
+
+
+def test_state_signature_determines_leaf_value():
+    """Equal signatures must imply equal leaf values (cache correctness)."""
+    game = make_midgame_1v1()
+    value_fn = make_f_value_fn()
+    a = f_leaf_value(game, Color.RED, value_fn)
+    b = f_leaf_value(game.copy(), Color.RED, value_fn)
+    assert state_signature(game, Color.RED) == state_signature(game.copy(), Color.RED)
+    assert a == b

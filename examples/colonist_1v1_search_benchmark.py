@@ -75,16 +75,16 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"MCTS(F-leaf, {args.value_fn}) vs {args.opponent}")
     print(
-        f"{'budget':>8}  {'sims/s':>10}  {'nodes/s':>10}  "
+        f"{'budget':>8}  {'sims/s':>10}  {'cache hit':>9}  "
         f"{'win%':>7}  {'95% CI':>16}  {'seat gap':>9}"
     )
     for budget in budgets:
         prof = _profile_throughput(budget)
         sims_s = prof.get("simulations_per_s", float("nan"))
-        nodes_s = prof.get("nodes_per_s", float("nan"))
+        hit_rate = prof.get("leaf_cache_hit_rate", float("nan"))
 
         if args.profile_only:
-            print(f"{budget:>7.0f}m  {sims_s:>10.0f}  {nodes_s:>10.0f}")
+            print(f"{budget:>7.0f}m  {sims_s:>10.0f}  {hit_rate:>8.1%}")
             continue
 
         spec = f"M:1:False:{args.value_fn}:{budget:g}"
@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         ci = f"[{res.wilson_low:.1%},{res.wilson_high:.1%}]"
         print(
-            f"{budget:>7.0f}m  {sims_s:>10.0f}  {nodes_s:>10.0f}  "
+            f"{budget:>7.0f}m  {sims_s:>10.0f}  {hit_rate:>8.1%}  "
             f"{res.win_rate:>6.1%}  {ci:>16}  {seat_gap:>8.1%}"
         )
         if not args.profile_only:

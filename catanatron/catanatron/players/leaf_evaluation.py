@@ -40,6 +40,27 @@ def make_f_value_fn(value_fn_builder_name: str = "base_fn", params=None) -> Valu
     return get_value_fn(value_fn_builder_name, params)
 
 
+def state_signature(game: Game, color: Color):
+    """A cheap, hashable key capturing everything ``f_leaf_value`` reads.
+
+    The F value function depends only on the board (settlements, cities, roads,
+    robber) and the per-player scalar state (victory points, hands, dev cards,
+    played knights, longest road). Two states with the same signature therefore
+    produce the same leaf value, so this is a collision-free key for caching F
+    evaluations across transposed positions. It deliberately excludes hidden
+    deck *ordering*, which the value function does not use.
+    """
+    state = game.state
+    board = state.board
+    return (
+        color,
+        tuple(sorted(state.player_state.items())),
+        frozenset(board.buildings.items()),
+        frozenset(board.roads.items()),
+        board.robber_coordinate,
+    )
+
+
 def f_leaf_value(game: Game, color: Color, value_fn: Optional[ValueFn] = None) -> float:
     """Estimate ``color``'s win probability in ``[0, 1]`` for the given state.
 
