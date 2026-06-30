@@ -98,6 +98,130 @@ def load_teacher_parquet(
     return df
 
 
+# Dataset v2 column names (see catanatron.gym.accumulators).
+GAME_ID_COLUMN = "GAME_ID"
+SEAT_COLUMN = "SEAT"
+PHASE_COLUMN = "PHASE"
+NUM_LEGAL_COLUMN = "NUM_LEGAL"
+LEGAL_ACTIONS_COLUMN = "LEGAL_ACTIONS"
+
+
+def grouped_split_masks(
+    game_ids: Sequence,
+    val_fraction: float,
+    test_fraction: float = 0.0,
+    seed: int = 0,
+):
+    """Split row indices into train/val/test by game so no game leaks across splits.
+
+    Returns three boolean ``numpy`` masks aligned with ``game_ids``. Splitting on
+    whole games (not individual rows) is what makes behavioral-cloning validation
+    honest: rows from one game are highly correlated, so a row-level split inflates
+    the headline accuracy.
+    """
+    game_ids = np.asarray(game_ids)
+    unique = np.unique(game_ids)
+    rng = np.random.default_rng(seed)
+    rng.shuffle(unique)
+
+    n = len(unique)
+    n_test = int(n * test_fraction)
+    n_val = int(n * val_fraction)
+    test_games = set(unique[:n_test].tolist())
+    val_games = set(unique[n_test : n_test + n_val].tolist())
+
+    test_mask = np.array([g in test_games for g in game_ids], dtype=bool)
+    val_mask = np.array([g in val_games for g in game_ids], dtype=bool)
+    train_mask = ~(test_mask | val_mask)
+    return train_mask, val_mask, test_mask
+
+
+def _legal_to_list(legal):
+    """Normalize a stored LEGAL_ACTIONS cell to a python list of ints."""
+    if legal is None:
+        return []
+    return [int(x) for x in legal]
+
+
+def decision_metrics(
+    logits: np.ndarray,
+    y_true: np.ndarray,
+    *,
+    action_types: Optional[np.ndarray] = None,
+    num_legal: Optional[np.ndarray] = None,
+    legal_actions: Optional[Sequence] = None,
+    topk: Sequence[int] = (1, 3, 5),
+):
+    """Decision-quality metrics that do not reward forced moves.
+
+    ``logits`` are raw policy scores over the full action space. When the legal
+    action set is supplied, accuracy is measured *within the legal candidates*
+    (a legal-masked argmax) and restricted to genuine choices (``NUM_LEGAL > 1``),
+    so ROLL/END_TURN-style forced rows cannot inflate the score. Without the v2
+    columns it degrades to plain top-1 accuracy.
+    """
+    logits = np.asarray(logits)
+    y_true = np.asarray(y_true)
+    n = len(y_true)
+    metrics: dict[str, Any] = {"rows": int(n)}
+    if n == 0:
+        return metrics
+
+    raw_pred = logits.argmax(axis=1)
+    metrics["accuracy"] = float((raw_pred == y_true).mean())
+
+    if num_legal is None:
+        return metrics
+
+    num_legal = np.asarray(num_legal)
+    choice = num_legal > 1
+    metrics["choice_rows"] = int(choice.sum())
+    metrics["forced_fraction"] = float((~choice).mean())
+
+    if legal_actions is None:
+        if choice.any():
+            metrics["choice_accuracy"] = float(
+                (raw_pred[choice] == y_true[choice]).mean()
+            )
+        return metrics
+
+    legal_lists = [_legal_to_list(legal_actions[i]) for i in range(n)]
+    max_k = max(topk)
+    topk_hits = {k: [] for k in topk}
+    masked_correct = []
+    per_family_correct: dict[int, list] = {}
+
+    for i in range(n):
+        if not choice[i]:
+            continue
+        legal = legal_lists[i]
+        if not legal:
+            continue
+        legal_arr = np.asarray(legal)
+        legal_scores = logits[i, legal_arr]
+        order = np.argsort(-legal_scores)
+        ranked = legal_arr[order]
+        masked_pred = int(ranked[0])
+        is_correct = masked_pred == int(y_true[i])
+        masked_correct.append(is_correct)
+        for k in topk:
+            topk_hits[k].append(int(y_true[i]) in ranked[:k].tolist())
+        if action_types is not None:
+            fam = int(action_types[i])
+            per_family_correct.setdefault(fam, []).append(is_correct)
+
+    if masked_correct:
+        metrics["legal_choice_accuracy"] = float(np.mean(masked_correct))
+        for k in topk:
+            if k <= max_k and topk_hits[k]:
+                metrics[f"legal_top{k}_accuracy"] = float(np.mean(topk_hits[k]))
+    if per_family_correct:
+        metrics["per_action_family_accuracy"] = {
+            str(fam): float(np.mean(vals)) for fam, vals in per_family_correct.items()
+        }
+    return metrics
+
+
 def build_mlp_layers(
     obs_dim: int,
     n_actions: int,

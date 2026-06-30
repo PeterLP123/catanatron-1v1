@@ -10,7 +10,11 @@ from catanatron import Action, Color, Game
 from catanatron.features import create_sample
 from catanatron.game import GameAccumulator
 from catanatron.gym.board_tensor_features import create_board_tensor
-from catanatron.gym.envs.action_space import to_action_space, to_action_type_space
+from catanatron.gym.envs.action_space import (
+    get_action_array,
+    to_action_space,
+    to_action_type_space,
+)
 from catanatron.gym.utils import (
     DISCOUNT_FACTOR,
     get_tournament_total_return,
@@ -39,6 +43,24 @@ class ReinforcementLearningAccumulator(GameAccumulator):
         # TODO: Generalize to "rewards_fn" that can yield intermediary rewards
         #   while still rewarding big on terminal states.
         self.total_return_fns = total_return_fns
+        # Lazily-built {(action_type, value): action_index} map, used to record
+        # the legal-action set per decision (dataset v2 "honest measurement").
+        self._action_index = None
+
+    def _ensure_action_index(self):
+        if self._action_index is None:
+            actions_array = get_action_array(self.player_colors, self.map_type)
+            self._action_index = {pair: i for i, pair in enumerate(actions_array)}
+
+    def _legal_action_indices(self, game):
+        """Action-space indices of the legal actions at this decision point."""
+        self._ensure_action_index()
+        indices = []
+        for action in game.playable_actions:
+            idx = self._action_index.get((action.action_type, action.value))
+            if idx is not None:
+                indices.append(idx)
+        return indices
 
     def before(self, game):
         self.data = {
@@ -47,6 +69,12 @@ class ReinforcementLearningAccumulator(GameAccumulator):
             "acting_color": [],
             "samples": [],
             "actions": [],
+            # Dataset v2 decision metadata (one entry per recorded decision).
+            "game_ids": [],
+            "seats": [],
+            "phases": [],
+            "num_legal": [],
+            "legal_actions": [],
         }
         if self.include_board_tensor:
             self.data["board_tensors"] = []
@@ -63,6 +91,17 @@ class ReinforcementLearningAccumulator(GameAccumulator):
                 to_action_type_space(action.action_type),
             ]
         )
+
+        # Dataset v2: record who decided, in which phase, and over how many legal
+        # actions, so downstream training can split by game, filter forced
+        # decisions, and score against the legal candidate set.
+        legal_indices = self._legal_action_indices(game_before_action)
+        prompt = game_before_action.state.current_prompt
+        self.data["game_ids"].append(game_before_action.id)
+        self.data["seats"].append(self.player_colors.index(action.color))
+        self.data["phases"].append(getattr(prompt, "name", str(prompt)))
+        self.data["num_legal"].append(len(game_before_action.playable_actions))
+        self.data["legal_actions"].append(legal_indices)
 
         if self.include_board_tensor:
             board_tensor = create_board_tensor(game_before_action, action.color)
@@ -113,10 +152,24 @@ class ReinforcementLearningAccumulator(GameAccumulator):
         )
         returns_df = pd.DataFrame({**returns, **discount_columns}).astype("float64")
 
+        # Dataset v2 per-decision metadata (kept out of the CSV main_df; the
+        # parquet writer attaches it). LEGAL_ACTIONS is a variable-length list
+        # column, so it is built separately from the typed columns.
+        meta_df = pd.DataFrame(
+            {
+                "GAME_ID": self.data["game_ids"],
+                "SEAT": np.asarray(self.data["seats"], dtype="int64"),
+                "PHASE": self.data["phases"],
+                "NUM_LEGAL": np.asarray(self.data["num_legal"], dtype="int64"),
+            }
+        )
+        meta_df["LEGAL_ACTIONS"] = self.data["legal_actions"]
+
         results = {
             "samples_df": samples_df,
             "actions_df": actions_df,
             "returns_df": returns_df,
+            "meta_df": meta_df,
         }
         if self.include_board_tensor:
             board_tensors = self.data["board_tensors"]
@@ -195,7 +248,9 @@ class ParquetDataAccumulator(ReinforcementLearningAccumulator):
             return
 
         t1 = time.time()
-        main_df = data["main_df"]
+        # Lead with the dataset v2 metadata columns (GAME_ID, SEAT, PHASE,
+        # NUM_LEGAL, LEGAL_ACTIONS) so grouped splits and decision metrics work.
+        main_df = pd.concat([data["meta_df"], data["main_df"]], axis=1)
         filepath = os.path.join(self.output, f"{game.id}.parquet")
         main_df.to_parquet(filepath, index=False)
         print(
