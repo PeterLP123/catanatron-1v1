@@ -1,11 +1,10 @@
 import math
-import time
 from collections import defaultdict
 import random
 
 from catanatron.game import Game
 from catanatron.models.player import Player
-from catanatron.players.playouts import run_playout
+from catanatron.players.leaf_evaluation import f_leaf_value, make_f_value_fn
 from catanatron.players.tree_search_utils import execute_spectrum, list_prunned_actions
 
 SIMULATIONS = 10
@@ -14,38 +13,59 @@ EXP_C = 2**0.5
 
 
 class MCTSPlayer(Player):
-    def __init__(self, color, num_simulations=SIMULATIONS, prunning=False):
+    def __init__(
+        self,
+        color,
+        num_simulations=SIMULATIONS,
+        prunning=False,
+        value_fn_name="base_fn",
+    ):
         super().__init__(color)
         self.num_simulations = int(num_simulations)
         self.prunning = bool(prunning)
+        # Only store picklable config; the F value function is a closure and is
+        # built per-decision so the player stays picklable (it can be shipped to
+        # multiprocessing workers by other players in the same game).
+        self.value_fn_name = value_fn_name
+
+    def _leaf_value_fn(self):
+        # Build the F value function once per decision and reuse it as the search
+        # leaf evaluator (replaces random playouts) across all leaves.
+        value_fn = make_f_value_fn(self.value_fn_name)
+
+        def evaluate(game, color):
+            return f_leaf_value(game, color, value_fn)
+
+        return evaluate
 
     def decide(self, game: Game, playable_actions):
         actions = list_prunned_actions(game) if self.prunning else playable_actions
         if len(actions) == 1:
             return actions[0]
 
-        start = time.time()
-        root = StateNode(self.color, game.copy(), None, self.prunning)
+        root = StateNode(
+            self.color, game.copy(), None, self.prunning, self._leaf_value_fn()
+        )
         for _ in range(self.num_simulations):
             root.run_simulation()
 
-        # print(
-        #     f"{str(self)} took {time.time() - start} secs to decide {len(playable_actions)}"
-        # )
-        return root.choose_best_action()
+        return root.best_action_by_visits()
 
     def __repr__(self):
         return super().__repr__() + f"({self.num_simulations}:{self.prunning})"
 
 
 class StateNode:
-    def __init__(self, color, game: Game, parent, prunning=False):
+    def __init__(self, color, game: Game, parent, prunning=False, leaf_value_fn=None):
         self.level = 0 if parent is None else parent.level + 1
         self.color = color  # color of player carrying out MCTS
         self.parent = parent
         self.game = game  # state
         self.children = []
         self.prunning = prunning
+        # Heuristic leaf evaluator, shared down the tree. Falls back to the F
+        # value function so standalone StateNodes still evaluate correctly.
+        self.leaf_value_fn = leaf_value_fn or (lambda g, c: f_leaf_value(g, c))
 
         self.wins = 0
         self.visits = 0
@@ -65,13 +85,15 @@ class StateNode:
             tmp = tmp.select()
             tmp.visits += 1
 
-            # playout
-            result = tmp.playout()
+            # evaluate the leaf with the F value function (not a random playout)
+            value = tmp.leaf_value()
         else:
-            result = self.game.winning_color()
+            # Read the winner from the *selected terminal leaf*, not the root.
+            winner = tmp.game.winning_color()
+            value = 1.0 if winner == self.color else 0.0
 
         # backpropagate
-        tmp.backpropagate(result == self.color)
+        tmp.backpropagate(value)
 
     def is_leaf(self):
         return len(self.children) == 0
@@ -87,42 +109,67 @@ class StateNode:
             outcomes = execute_spectrum(self.game, action)
             for state, proba in outcomes:
                 children[action].append(
-                    (StateNode(self.color, state, self, self.prunning), proba)
+                    (
+                        StateNode(
+                            self.color, state, self, self.prunning, self.leaf_value_fn
+                        ),
+                        proba,
+                    )
                 )
         self.children = children
 
     def select(self):
-        """select a child StateNode"""
-        action = self.choose_best_action()
+        """Descend into a child StateNode for the in-tree (UCT) policy."""
+        action = self._select_action(exploration=True)
 
-        # Idea: Allow randomness to guide to next children too
+        # Sample the chance outcome for the chosen action by its probability.
         children = self.children[action]
         children_states = list(map(lambda c: c[0], children))
         children_probas = list(map(lambda c: c[1], children))
         return random.choices(children_states, weights=children_probas, k=1)[0]
 
-    def choose_best_action(self):
-        scores = []
-        for action in self.game.playable_actions:
-            score = self.action_children_expected_score(action)
-            scores.append(score)
+    def _select_action(self, exploration=True):
+        """Pick an action among the *expanded* ones using a negamax UCT score.
 
+        Scores are kept from the MCTS player's perspective (``self.color``).
+        When it is the opponent's turn at this node, they minimize our win
+        probability, so the stored value is flipped before ranking.
+        """
+        actions = list(self.children.keys())
+        scores = [self._action_score(a, exploration) for a in actions]
         idx = max(range(len(scores)), key=lambda i: scores[i])
-        action = self.game.playable_actions[idx]
-        return action
+        return actions[idx]
 
-    def action_children_expected_score(self, action):
-        score = 0
+    def best_action_by_visits(self):
+        """Final move choice: the most-visited (robust) expanded action."""
+        actions = list(self.children.keys())
+        visits = [sum(child.visits for child, _ in self.children[a]) for a in actions]
+        idx = max(range(len(visits)), key=lambda i: visits[i])
+        return actions[idx]
+
+    def _action_score(self, action, exploration=True):
+        to_move = self.game.state.current_color()
+        opponent_turn = to_move != self.color
+        score = 0.0
         for child, proba in self.children[action]:
-            score += proba * (
-                child.wins / (child.visits + epsilon)
-                + EXP_C
+            if child.visits == 0:
+                q = 0.5  # neutral prior for an unvisited child
+            else:
+                q = child.wins / child.visits  # self.color win-rate proxy in [0, 1]
+            if opponent_turn:
+                q = 1.0 - q  # opponent maximizes their own win probability
+            u = (
+                EXP_C
                 * (math.log(self.visits + epsilon) / (child.visits + epsilon)) ** 0.5
+                if exploration
+                else 0.0
             )
+            score += proba * (q + u)
         return score
 
-    def playout(self):
-        return run_playout(self.game)
+    def leaf_value(self):
+        """Heuristic value of this leaf in ``[0, 1]`` from ``self.color``'s view."""
+        return self.leaf_value_fn(self.game, self.color)
 
     def backpropagate(self, value):
         self.wins += value
@@ -130,5 +177,4 @@ class StateNode:
         tmp = self
         while tmp.parent is not None:
             tmp = tmp.parent
-
             tmp.wins += value
