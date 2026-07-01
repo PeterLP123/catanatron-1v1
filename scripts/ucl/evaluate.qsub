@@ -1,0 +1,44 @@
+#!/bin/bash -l
+#$ -S /bin/bash
+#$ -N catan_eval
+#$ -l h_rt=72:00:00
+#$ -l mem=8G
+#$ -l tmpfs=20G
+#$ -cwd
+#$ -j y
+
+set -euo pipefail
+
+REPO_DIR=${REPO_DIR:-"$HOME/Scratch/catanatron-1v1"}
+IMAGE_PATH=${IMAGE_PATH:-"$HOME/Scratch/catanatron-1v1.sif"}
+MODEL_REL=${MODEL_REL:-}
+PROTOCOL=${PROTOCOL:-fast}
+EVAL_GAMES=${EVAL_GAMES:-200}
+
+[[ -n "$MODEL_REL" ]] || { echo "Set MODEL_REL to a checkpoint path relative to the repository." >&2; exit 2; }
+[[ -f "$REPO_DIR/$MODEL_REL" ]] || { echo "Missing model: $REPO_DIR/$MODEL_REL" >&2; exit 2; }
+[[ -f "$IMAGE_PATH" ]] || { echo "Missing image: $IMAGE_PATH" >&2; exit 2; }
+
+module load apptainer
+WORK_DIR="$TMPDIR/catanatron-1v1"
+MODEL_DIR=$(dirname "$MODEL_REL")
+OUTPUT_DIR="$REPO_DIR/$MODEL_DIR/ucl_eval_${JOB_ID}"
+mkdir -p "$WORK_DIR" "$OUTPUT_DIR"
+rsync -a --exclude .git --exclude data --exclude runs "$REPO_DIR/" "$WORK_DIR/"
+
+export APPTAINERENV_PYTHONPATH=/workspace/catanatron
+
+echo "host=$(hostname) job=$JOB_ID model=$MODEL_REL protocol=$PROTOCOL games=$EVAL_GAMES"
+apptainer exec \
+  --bind "$WORK_DIR:/workspace" \
+  --bind "$REPO_DIR:/repo" \
+  --bind "$OUTPUT_DIR:/outputs" \
+  "$IMAGE_PATH" \
+  python /workspace/examples/colonist_1v1_evaluate.py \
+    --agent "L:/repo/$MODEL_REL" \
+    --protocol "$PROTOCOL" \
+    --num-games "$EVAL_GAMES" \
+    --gates \
+    --report /outputs/evaluation.json
+
+echo "Evaluation report: $OUTPUT_DIR/evaluation.json"
