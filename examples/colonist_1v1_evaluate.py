@@ -17,8 +17,10 @@ from pathlib import Path
 from catanatron.colonist_1v1_eval import (
     DEFAULT_BENCHMARK_GATES,
     EVAL_PROTOCOLS,
+    EvalProtocol,
     EvaluationReport,
     append_model_registry,
+    build_eval_meta,
     evaluate_matchup,
     format_matchup_line,
     get_eval_protocol,
@@ -76,6 +78,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run-dir", type=Path, default=None)
     p.add_argument("--checkpoint-label", default=None)
     p.add_argument("--training-timesteps", type=int, default=None)
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Base game seed (default: the selected protocol's fixed seed).",
+    )
     seat_group = p.add_mutually_exclusive_group()
     seat_group.add_argument(
         "--both-seats",
@@ -110,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
             run_dir=args.run_dir,
             checkpoint_label=args.checkpoint_label,
             training_timesteps=args.training_timesteps,
+            seed=args.seed,
         )
         print_report(report)
         if args.report:
@@ -120,6 +129,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Updated registry {args.registry}")
         return 0 if report.all_gates_passed or not args.gates else 1
 
+    single_seed = (
+        args.seed if args.seed is not None else get_eval_protocol(args.protocol).seed
+    )
     result = evaluate_matchup(
         args.agent,
         args.opponent,
@@ -127,12 +139,26 @@ def main(argv: list[str] | None = None) -> int:
         gate=DEFAULT_BENCHMARK_GATES.get(args.opponent) if args.gates else None,
         both_seats=args.both_seats,
         quiet=True,
+        seed=single_seed,
     )
     print(format_matchup_line(result))
     if args.report:
         r = EvaluationReport(
             agent=args.agent,
             matchups=[result],
+            meta=build_eval_meta(
+                agent_spec=args.agent,
+                protocol=EvalProtocol(
+                    name=f"{args.protocol}-single",
+                    opponents=(args.opponent,),
+                    num_games=args.num_games or 200,
+                    seed=single_seed,
+                ),
+                run_dir=args.run_dir,
+                checkpoint_label=args.checkpoint_label,
+                training_timesteps=args.training_timesteps,
+                both_seats=args.both_seats,
+            ),
             summary={
                 "gates_passed_count": 1 if result.passed_gate else 0,
                 "gates_total": 1 if result.gate is not None else 0,

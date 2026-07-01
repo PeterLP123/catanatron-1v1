@@ -75,10 +75,10 @@ Nothing else can be judged until measurement is unbiased. This is pure eval-side
   `balanced` (`colonist_training.py:280-292`) front-loads F/VP/W teachers via
   `make_mixed_opponent_factory` (`:338-400`) — the opposite of the collapsed self-play run.
   **Avoid the `self_play` curriculum at this stage.**
-- **Reward aligned to the goal:** add `--visible-vp-reward` so shaping uses *public* VP
-  (`make_colonist_shaped_reward(use_visible_vp=True)`, `colonist_rewards.py:49-81`) — a human
-  can't see hidden dev-card VP, and the friendly-robber rule already keys on visible VP. Treat
-  actual-VP vs visible-VP as a quick A/B.
+- **Reward shaping A/B:** compare actual-VP shaping with `--visible-vp-reward`, which uses
+  public score only (`make_colonist_shaped_reward(use_visible_vp=True)`). A player legitimately
+  knows its own hidden VP cards, so this is a learning-signal ablation rather than a hidden-
+  information fix.
 - **Milestone target:** pass R/W/VP gates and **beat F (≥52%)** on two-seat eval. This unblocks
   everything downstream.
 
@@ -107,10 +107,9 @@ This is where the chosen goal diverges from "just pass the gates."
   and VP-margin *distributions* (not just win rate) for repeatable losing lines.
 - **Self-play polish last:** only after the bot beats heuristics, a short `self_play`-curriculum
   stage sharpens play (at high anchor strength it refines rather than collapses).
-- **Investigation (scope as follow-up):** audit whether the env observation leaks hidden
-  information (opponent hand / dev-card VP) in `gym/envs/`. If it does, an imperfect-information
-  observation is the most principled change for human-like play — sized separately as it touches
-  the observation space and would require retraining.
+- **Observation audit completed:** the vector exposes the acting player's own private cards and
+  only public opponent hand/development-card counts, not opponent card identities. No observation
+  redesign is currently justified.
 
 ## Phase 4 — Reproducibility (supports hybrid iteration)
 

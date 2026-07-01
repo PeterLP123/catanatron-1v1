@@ -98,10 +98,15 @@ class State:
         friendly_robber_use_visible_vp: bool = False,
         number_placement: NumberPlacement = "official_spiral",
         dice_mode: DiceMode = "balanced",
+        shuffle_players: bool = True,
         initialize=True,
     ):
         if initialize:
-            self.players = random.sample(players, len(players))
+            self.players = (
+                random.sample(players, len(players))
+                if shuffle_players
+                else list(players)
+            )
             self.colors = tuple([player.color for player in self.players])
             self.board = Board(
                 catan_map or CatanMap.from_template(BASE_MAP_TEMPLATE, number_placement)

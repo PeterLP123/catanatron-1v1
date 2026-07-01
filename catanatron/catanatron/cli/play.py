@@ -1,5 +1,6 @@
 import os
 import importlib.util
+import random
 from dataclasses import dataclass
 from typing import Literal, Union
 
@@ -29,8 +30,6 @@ from catanatron.cli.accumulators import (
     StatisticsAccumulator,
     VpDistributionAccumulator,
 )
-from catanatron.cli.simulation_accumulator import SimulationAccumulator
-
 
 custom_theme = Theme(
     {
@@ -96,6 +95,26 @@ class CustomTimeRemainingColumn(TimeRemainingColumn):
     "(parquet only, slower). Enables decision-margin training and regret metrics.",
 )
 @click.option(
+    "--seed",
+    type=int,
+    default=None,
+    help="Base game seed. Game i uses seed+i; omit for non-deterministic games.",
+)
+@click.option(
+    "--parquet-shard-games",
+    type=click.IntRange(min=1),
+    default=1,
+    help="Games per Parquet shard (default 1 preserves the generic CLI format).",
+)
+@click.option(
+    "--choices-only",
+    is_flag=True,
+    default=False,
+    help="Write only rows with more than one legal action to Parquet.",
+)
+@click.option("--parquet-start-shard", type=int, default=0, hidden=True)
+@click.option("--dataset-meta", default=None, hidden=True)
+@click.option(
     "--config-discard-limit",
     default=7,
     help="Sets Discard Limit to use in games.",
@@ -150,6 +169,11 @@ def simulate(
     output_format,
     include_board_tensor,
     score_candidates,
+    seed,
+    parquet_shard_games,
+    choices_only,
+    parquet_start_shard,
+    dataset_meta,
     config_discard_limit,
     config_vps_to_win,
     config_map,
@@ -184,7 +208,14 @@ def simulate(
 
     players = parse_cli_string(players)
     output_options = OutputOptions(
-        output, output_format, include_board_tensor, score_candidates
+        output,
+        output_format,
+        include_board_tensor,
+        score_candidates,
+        parquet_shard_games,
+        choices_only,
+        parquet_start_shard,
+        dataset_meta,
     )
     game_config = GameConfigOptions.from_cli(
         config_discard_limit,
@@ -193,6 +224,7 @@ def simulate(
         config_number_placement,
         config_friendly_robber,
         colonist_1v1,
+        seed=seed,
     )
     if colonist_1v1 and len(players) != 2:
         return print(
@@ -215,6 +247,10 @@ class OutputOptions:
     output_format: Union[Literal["csv", "parquet", "json"], None] = None
     include_board_tensor: bool = False
     score_candidates: bool = False
+    parquet_shard_games: int = 1
+    choices_only: bool = False
+    parquet_start_shard: int = 0
+    dataset_meta: Union[str, None] = None
 
 
 @dataclass(frozen=True)
@@ -228,6 +264,8 @@ class GameConfigOptions:
     friendly_robber_vp_threshold: int = 3
     friendly_robber_use_visible_vp: bool = False
     colonist_1v1: bool = False
+    seed: Union[int, None] = None
+    shuffle_players: bool = True
 
     @classmethod
     def from_cli(
@@ -238,6 +276,8 @@ class GameConfigOptions:
         number_placement,
         friendly_robber,
         colonist_1v1,
+        seed=None,
+        shuffle_players=True,
     ):
         if colonist_1v1:
             from catanatron.colonist_1v1 import COLONIST_1V1_SETTINGS
@@ -253,6 +293,8 @@ class GameConfigOptions:
                 friendly_robber_vp_threshold=settings.friendly_robber_vp_threshold,
                 friendly_robber_use_visible_vp=settings.friendly_robber_use_visible_vp,
                 colonist_1v1=True,
+                seed=seed,
+                shuffle_players=shuffle_players,
             )
         return cls(
             discard_limit=discard_limit,
@@ -260,6 +302,8 @@ class GameConfigOptions:
             map_type=map_type,
             number_placement=number_placement,
             friendly_robber=friendly_robber,
+            seed=seed,
+            shuffle_players=shuffle_players,
         )
 
     def __post_init__(self):
@@ -291,18 +335,32 @@ def rich_color(color):
 
 def play_batch_core(num_games, players, game_config, accumulators=[]):
     for accumulator in accumulators:
-        if isinstance(accumulator, SimulationAccumulator):
-            accumulator.before_all()
+        before_all = getattr(accumulator, "before_all", None)
+        if callable(before_all):
+            before_all()
 
-    for _ in range(num_games):
+    for game_index in range(num_games):
         for player in players:
             player.reset_state()
+        game_seed = (
+            game_config.seed + game_index if game_config.seed is not None else None
+        )
+        if game_seed is not None:
+            # Map construction also consumes the module RNG, so seed before it.
+            random.seed(game_seed)
         catan_map = build_map(game_config.map_type, game_config.number_placement)
         if game_config.colonist_1v1:
-            game = Game(players, catan_map=catan_map, colonist_1v1=True)
+            game = Game(
+                players,
+                seed=game_seed,
+                catan_map=catan_map,
+                colonist_1v1=True,
+                shuffle_players=game_config.shuffle_players,
+            )
         else:
             game = Game(
                 players,
+                seed=game_seed,
                 discard_limit=game_config.discard_limit,
                 friendly_robber=game_config.friendly_robber,
                 friendly_robber_vp_threshold=game_config.friendly_robber_vp_threshold,
@@ -310,13 +368,15 @@ def play_batch_core(num_games, players, game_config, accumulators=[]):
                 vps_to_win=game_config.vps_to_win,
                 dice_mode=game_config.dice_mode,
                 catan_map=catan_map,
+                shuffle_players=game_config.shuffle_players,
             )
         game.play(accumulators)
         yield game
 
     for accumulator in accumulators:
-        if isinstance(accumulator, SimulationAccumulator):
-            accumulator.after_all()
+        after_all = getattr(accumulator, "after_all", None)
+        if callable(after_all):
+            after_all()
 
 
 def play_batch(
@@ -358,6 +418,10 @@ def play_batch(
                     output_options.output,
                     output_options.include_board_tensor,
                     score_candidates=output_options.score_candidates,
+                    shard_games=output_options.parquet_shard_games,
+                    choices_only=output_options.choices_only,
+                    start_shard_index=output_options.parquet_start_shard,
+                    dataset_meta=output_options.dataset_meta,
                 )
             )
         elif output_options.output_format == "json":

@@ -107,6 +107,7 @@ def test_seat_randomization_disabled_by_default():
     for _ in range(20):
         env.reset()
         assert env.players[0] is env.p0
+        assert env.game.state.players[0] is env.p0
 
 
 def test_seat_randomization_reaches_both_seats():
@@ -118,10 +119,10 @@ def test_seat_randomization_reaches_both_seats():
         }
     )
     env.reset(seed=0)
-    seats = {env.players.index(env.p0)}
+    seats = {env.game.state.players.index(env.p0)}
     for _ in range(40):
         env.reset()
-        seats.add(env.players.index(env.p0))
+        seats.add(env.game.state.players.index(env.p0))
     assert seats == {0, 1}
 
 
@@ -140,6 +141,7 @@ def test_seat_randomization_does_not_change_observation_or_action_shape():
     seat_second._p0_seat_index = 1
     obs_second, _ = seat_second.reset(seed=0)
     assert seat_second.players.index(seat_second.p0) == 1
+    assert seat_second.game.state.players.index(seat_second.p0) == 1
 
     assert obs_first.shape == obs_second.shape
     assert seat_first.observation_space.shape == seat_second.observation_space.shape
@@ -162,7 +164,7 @@ def test_self_play_env_respects_randomized_seat():
         wrapped.reset(seed=i)
         u = wrapped.env.unwrapped
         assert u.enemies[0] is opponent
-        seats.add(u.players.index(u.p0))
+        seats.add(u.game.state.players.index(u.p0))
     assert seats == {0, 1}
 
 
@@ -414,6 +416,8 @@ def test_textual_app_smoke(tmp_path):
         async with app.run_test(size=(100, 30)) as pilot:
             await pilot.pause(0.1)
             await pilot.press("4")
+            await pilot.pause(0.1)
+            await pilot.press("7")
             await pilot.pause(0.1)
 
     asyncio.run(run_app())

@@ -37,3 +37,4 @@ logs/
 *.pth
 *.zip
 events.out.tfevents.*
+.gstack/

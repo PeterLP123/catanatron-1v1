@@ -4,7 +4,8 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 VENV=${VENV:-"$HOME/.venvs/catanatron-1v1"}
 TRAIN_PRESET=${TRAIN_PRESET:-standard}
-RUN_NAME=${RUN_NAME:-"ucl_cs_${TRAIN_PRESET}_$(date +%Y%m%d_%H%M%S)"}
+EXPERIMENT_ID=${EXPERIMENT_ID:-}
+RUN_NAME=${RUN_NAME:-${EXPERIMENT_ID:-"ucl_cs_${TRAIN_PRESET}_$(date +%Y%m%d_%H%M%S)"}}
 RUN_DIR=${RUN_DIR:-"$ROOT/runs/$RUN_NAME"}
 SESSION=${SESSION:-"catan-${RUN_NAME}"}
 SESSION=$(printf '%s' "$SESSION" | tr -cs '[:alnum:]_-' '-')
@@ -32,7 +33,17 @@ printf -v Q_PRESET '%q' "$TRAIN_PRESET"
 printf -v Q_NAME '%q' "$RUN_NAME"
 printf -v Q_RUN_DIR '%q' "$RUN_DIR"
 
-TRAIN_COMMAND="cd $Q_ROOT && VENV=$Q_VENV TRAIN_PRESET=$Q_PRESET RUN_NAME=$Q_NAME RUN_DIR=$Q_RUN_DIR bash scripts/ucl_cs/train.sh; exec bash"
+TRAIN_ENV="VENV=$Q_VENV TRAIN_PRESET=$Q_PRESET RUN_NAME=$Q_NAME RUN_DIR=$Q_RUN_DIR"
+for ENV_NAME in EXPERIMENT_ID SEED EVAL_PROTOCOL FINAL_EVAL_PROTOCOL VISIBLE_VP_REWARD \
+  SKIP_FINAL_EVAL NO_RANDOMIZE_SEATS TEACHER_CODES CURRICULUM TIMESTEPS \
+  SAVE_FREQ EVAL_FREQ EVAL_GAMES N_ENVS BC_CHECKPOINT RESUME_CHECKPOINT \
+  VEC_ENV VEC_START_METHOD; do
+  if [[ -v "$ENV_NAME" && -n "${!ENV_NAME}" ]]; then
+    printf -v Q_ENV_VALUE '%q' "${!ENV_NAME}"
+    TRAIN_ENV="$TRAIN_ENV ${ENV_NAME}=${Q_ENV_VALUE}"
+  fi
+done
+TRAIN_COMMAND="cd $Q_ROOT && $TRAIN_ENV bash scripts/ucl_cs/train.sh; exec bash"
 DASH_COMMAND="cd $Q_ROOT && sleep 2 && VENV=$Q_VENV RUN_DIR=$Q_RUN_DIR bash scripts/ucl_cs/dashboard.sh; exec bash"
 GPU_COMMAND="watch -n 3 nvidia-smi; exec bash"
 

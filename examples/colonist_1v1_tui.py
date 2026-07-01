@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from catanatron.gym.colonist_training import EVENTS_NAME, MODEL_REGISTRY_NAME
+from catanatron.gym.experiment_backlog import EXPERIMENTS, backlog_statuses
 from catanatron.gym.tui_data import (
     OPPONENT_COLUMNS,
     build_bc_command,
@@ -20,6 +21,7 @@ from catanatron.gym.tui_data import (
     data_dirs_for_specs,
     format_pct,
     format_score,
+    format_duration,
     list_run_dirs,
     load_registry,
     read_jsonl_safe,
@@ -51,9 +53,9 @@ def build_dashboard(run_dir: Path):
 
     layout = Layout()
     layout.split_column(
-        Layout(name="header", size=5),
+        Layout(name="header", size=4),
         Layout(name="body"),
-        Layout(name="events", size=12),
+        Layout(name="events", size=8),
     )
     layout["body"].split_row(Layout(name="progress"), Layout(name="models"))
 
@@ -76,6 +78,19 @@ def build_dashboard(run_dir: Path):
         "Timesteps", f"{summary.timesteps:,} / {_fmt(summary.target_timesteps)}"
     )
     progress.add_row("Progress", f"{summary.progress_ratio:.1%}")
+    progress.add_row(
+        "Rate",
+        (
+            "-"
+            if summary.steps_per_second is None
+            else f"{summary.steps_per_second:,.0f} steps/s"
+        ),
+    )
+    progress.add_row("ETA", format_duration(summary.eta_seconds))
+    progress.add_row("Elapsed", format_duration(summary.elapsed_seconds))
+    progress.add_row(
+        "Workers", f"{summary.vec_env} × {summary.n_envs or '-'} · seed {summary.seed}"
+    )
     progress.add_row("Latest score", format_score(summary.latest_score))
     progress.add_row(
         "Warnings", "; ".join(summary.warnings) if summary.warnings else "none"
@@ -204,6 +219,7 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
             ("4", "show_tab('ranking')", "Ranking"),
             ("5", "show_tab('evaluate')", "Evaluate"),
             ("6", "show_tab('logs')", "Logs"),
+            ("7", "show_tab('backlog')", "Backlog"),
             ("c", "cancel_job", "Cancel Job"),
         ]
 
@@ -290,6 +306,11 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
                 with TabPane("Ranking", id="ranking"):
                     yield Static(id="ranking-hero", classes="hero")
                     yield DataTable(id="ranking-table")
+                with TabPane("Backlog", id="backlog"):
+                    yield Static(
+                        "Dependency-aware UCL GPU experiment queue.", classes="hero"
+                    )
+                    yield DataTable(id="backlog-table")
                 with TabPane("Evaluate", id="evaluate"):
                     yield Static(
                         "Evaluate an existing checkpoint and append it to the registry.",
@@ -323,7 +344,7 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
                     yield Button("Cancel Active Job", id="cancel-job", variant="error")
                 with TabPane("Help", id="help"):
                     yield Static(
-                        "Keyboard: 1 Runs, 2 Launch, 3 Monitor, 4 Ranking, 5 Evaluate, 6 Logs, r Refresh, c Cancel, q Quit\n\n"
+                        "Keyboard: 1 Runs, 2 Launch, 3 Monitor, 4 Ranking, 5 Evaluate, 6 Logs, 7 Backlog, r Refresh, c Cancel, q Quit\n\n"
                         "Protocols: fast = R/W/VP/F, milestone adds G:25, full adds expensive M/AB search.\n"
                         "Curricula move from teachers/baselines toward self-play and stronger opponents.\n"
                         "The TUI writes commands, job status, and metrics into run_manifest.json and training_events.jsonl.",
@@ -497,6 +518,7 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
             self.refresh_runs()
             self.refresh_monitor()
             self.refresh_ranking()
+            self.refresh_backlog()
             self.refresh_logs()
 
         def refresh_runs(self) -> None:
@@ -539,6 +561,10 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
                 self.query_one("#monitor-progress", Static).update(
                     f"[bold]Timesteps[/] {s.timesteps:,} / {_fmt(s.target_timesteps)}\n"
                     f"[bold]Latest score[/] {format_score(s.latest_score)}\n"
+                    f"[bold]Rate[/] {_fmt(None if s.steps_per_second is None else f'{s.steps_per_second:,.0f} steps/s')}\n"
+                    f"[bold]ETA[/] {format_duration(s.eta_seconds)}\n"
+                    f"[bold]Elapsed[/] {format_duration(s.elapsed_seconds)}\n"
+                    f"[bold]Workers[/] {s.vec_env} × {s.n_envs or '-'} · seed {s.seed}\n"
                     f"[bold]Latest event[/] {s.latest_event}\n"
                     f"[bold]Final model[/] {_fmt(s.final_model)}"
                 )
@@ -550,6 +576,25 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
             except Exception:
                 return
             self._fill_eval_matrix()
+
+        def refresh_backlog(self) -> None:
+            try:
+                table = self.query_one("#backlog-table", DataTable)
+            except Exception:
+                return
+            statuses = backlog_statuses(self.runs_root)
+            table.clear(columns=True)
+            for col in ("ID", "Status", "Stage", "GPU hours", "Disk"):
+                table.add_column(col)
+            for experiment in EXPERIMENTS:
+                lo, hi = experiment.gpu_hours
+                table.add_row(
+                    experiment.id,
+                    statuses[experiment.id],
+                    experiment.stage,
+                    f"{lo:g}–{hi:g}",
+                    f"{experiment.storage_gib:g} GiB",
+                )
 
         def _fill_eval_matrix(self) -> None:
             try:

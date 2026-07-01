@@ -105,6 +105,7 @@ class Game:
         number_placement: NumberPlacement = "official_spiral",
         dice_mode: str = "balanced",
         colonist_1v1: bool = False,
+        shuffle_players: bool = True,
         initialize: bool = True,
     ):
         """Creates a game (doesn't run it).
@@ -119,6 +120,8 @@ class Game:
                 for independent fair dice. Defaults to "balanced".
             colonist_1v1 (bool, optional): Apply Colonist.io 1v1 rules (2 players, 15 VP,
                 balanced dice, friendly robber at 2 visible VP, safe hand 9). Defaults to False.
+            shuffle_players (bool, optional): Randomize supplied player order. Disable when
+                the caller explicitly controls first/second seat. Defaults to True.
             friendly_robber_vp_threshold (int, optional): Block robber on opponents below
                 this many victory points when friendly robber is on. Defaults to 3.
             friendly_robber_use_visible_vp (bool, optional): Use visible VP for friendly
@@ -156,7 +159,9 @@ class Game:
             self.seed = seed if seed is not None else random.randrange(sys.maxsize)
             random.seed(self.seed)
 
-            self.id = str(uuid.uuid4())
+            # Seeded simulations need stable IDs so regenerated datasets keep
+            # identical grouped train/validation splits.
+            self.id = f"seed-{seed}" if seed is not None else str(uuid.uuid4())
             self.vps_to_win = vps_to_win
             self.friendly_robber = friendly_robber
             self.colonist_1v1 = colonist_1v1
@@ -169,6 +174,7 @@ class Game:
                 friendly_robber_use_visible_vp=friendly_robber_use_visible_vp,
                 number_placement=number_placement,
                 dice_mode=dice_mode,
+                shuffle_players=shuffle_players,
             )
             self.dice_mode = dice_mode
             self.playable_actions = generate_playable_actions(self.state)

@@ -23,6 +23,31 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def parse_timestamp(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def format_duration(seconds: Optional[float]) -> str:
+    if seconds is None or seconds < 0:
+        return "-"
+    total = int(seconds)
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours:d}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes:d}m {secs:02d}s"
+    return f"{secs:d}s"
+
+
 def read_json_safe(path: Path, default: Any) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -143,6 +168,13 @@ class RunSummary:
     latest_event: str = "-"
     warnings: list[str] = field(default_factory=list)
     active_job: Optional[dict[str, Any]] = None
+    seed: Optional[int] = None
+    vec_env: str = "-"
+    n_envs: Optional[int] = None
+    steps_per_second: Optional[float] = None
+    eta_seconds: Optional[float] = None
+    elapsed_seconds: Optional[float] = None
+    stale_seconds: Optional[float] = None
 
     @property
     def progress_ratio(self) -> float:
@@ -151,7 +183,8 @@ class RunSummary:
         return min(1.0, max(0.0, self.timesteps / self.target_timesteps))
 
 
-def summarize_run(run_dir: Path) -> RunSummary:
+def summarize_run(run_dir: Path, *, now: Optional[datetime] = None) -> RunSummary:
+    now = now or datetime.now(timezone.utc)
     manifest = read_json_safe(run_dir / MANIFEST_NAME, {})
     events = read_jsonl_safe(run_dir / EVENTS_NAME, limit=500)
     registry = load_registry(run_dir)
@@ -166,6 +199,42 @@ def summarize_run(run_dir: Path) -> RunSummary:
     best = best_registry_row(registry)
     warnings = detect_warnings(run_dir, manifest, events, registry)
     active_job = manifest.get("active_job")
+    progress_events = [e for e in events if e.get("type") == "ppo_progress"][-10:]
+    steps_per_second = None
+    if len(progress_events) >= 2:
+        first, last = progress_events[0], progress_events[-1]
+        first_time = parse_timestamp(first.get("time"))
+        last_time = parse_timestamp(last.get("time"))
+        step_delta = int(last.get("timesteps") or 0) - int(first.get("timesteps") or 0)
+        if first_time and last_time:
+            seconds = (last_time - first_time).total_seconds()
+            if seconds > 0 and step_delta > 0:
+                steps_per_second = step_delta / seconds
+
+    target_timesteps = training.get("timesteps")
+    current_timesteps = int(latest_ppo.get("timesteps") or 0)
+    eta_seconds = None
+    if steps_per_second and target_timesteps:
+        eta_seconds = (
+            max(0, int(target_timesteps) - current_timesteps) / steps_per_second
+        )
+
+    created_at = parse_timestamp(manifest.get("created_at"))
+    updated_at = parse_timestamp(manifest.get("updated_at"))
+    elapsed_end = updated_at if manifest.get("phase") == "done" else now
+    elapsed_seconds = (
+        max(0.0, (elapsed_end - created_at).total_seconds())
+        if created_at and elapsed_end
+        else None
+    )
+    latest_progress_time = parse_timestamp(latest_ppo.get("time"))
+    stale_seconds = (
+        max(0.0, (now - latest_progress_time).total_seconds())
+        if latest_progress_time and manifest.get("phase") == "ppo_training"
+        else None
+    )
+    if stale_seconds is not None and stale_seconds > 900:
+        warnings.append(f"No training progress for {format_duration(stale_seconds)}")
     return RunSummary(
         run_dir=run_dir,
         run_id=str(manifest.get("run_id") or run_dir.name),
@@ -173,8 +242,8 @@ def summarize_run(run_dir: Path) -> RunSummary:
         preset=str(manifest.get("preset") or "-"),
         updated_at=str(manifest.get("updated_at") or manifest.get("created_at") or "-"),
         final_model=manifest.get("final_model"),
-        timesteps=int(latest_ppo.get("timesteps") or 0),
-        target_timesteps=training.get("timesteps"),
+        timesteps=current_timesteps,
+        target_timesteps=target_timesteps,
         latest_score=latest_eval.get("weighted_score"),
         best_score=score_value(best) if best else None,
         best_label=str(
@@ -184,6 +253,15 @@ def summarize_run(run_dir: Path) -> RunSummary:
         latest_event=str(latest_event.get("type") or "-"),
         warnings=warnings,
         active_job=active_job if isinstance(active_job, dict) else None,
+        seed=training.get("seed"),
+        vec_env=str(
+            training.get("vec_env") or training.get("vec_env_requested") or "-"
+        ),
+        n_envs=training.get("n_envs"),
+        steps_per_second=steps_per_second,
+        eta_seconds=eta_seconds,
+        elapsed_seconds=elapsed_seconds,
+        stale_seconds=stale_seconds,
     )
 
 

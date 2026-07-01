@@ -67,7 +67,8 @@ class CatanatronEnv(gym.Env):
             self._colonist_game_kwargs = None
         self.representation = self.config.get("representation", "vector")
         assert self.representation in ["mixed", "vector"]
-        # Use public VP for P0 instead of oracle actual VP (closer to human-visible Colonist).
+        # Optional ablation: hide the acting player's own private VP cards and
+        # expose only public score. Normal play legitimately knows its own cards.
         self.human_visible_obs = self.config.get("human_visible_obs", False)
 
         self.enemies = self.config.get("enemies", [RandomPlayer(Color.RED)])
@@ -222,6 +223,7 @@ class CatanatronEnv(gym.Env):
                 seed=seed,
                 catan_map=catan_map,
                 colonist_1v1=True,
+                shuffle_players=False,
             )
         else:
             self.game = Game(
@@ -229,6 +231,7 @@ class CatanatronEnv(gym.Env):
                 seed=seed,
                 catan_map=catan_map,
                 vps_to_win=self.vps_to_win,
+                shuffle_players=False,
             )
         self.invalid_actions_count = 0
 

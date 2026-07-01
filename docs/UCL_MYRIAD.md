@@ -131,7 +131,7 @@ qsub -ac allow=L \
   scripts/ucl/train.qsub
 ```
 
-Important: the current PPO script uses `DummyVecEnv`, so its environments execute sequentially within the process. Reserving all 36 CPU cores will not make the current implementation 36 times faster. The supplied job requests eight cores; the search/self-play implementation should be made genuinely multiprocess before asking for a full node.
+The PPO script now defaults to `SubprocVecEnv` whenever a preset uses more than one environment. It shares curriculum progress across workers and reloads the file-backed league index as checkpoints are promoted. Run `examples/colonist_1v1_env_benchmark.py` on the allocated node before changing CPU requests; process overhead can make small worker counts slower even when larger counts improve throughput.
 
 ## 7. Generate teacher data as CPU array jobs
 
@@ -145,9 +145,11 @@ Generate 2,000 `VP,F` games as twenty independent tasks:
 
 ```bash
 qsub -t 1-20 \
-  -v GAMES_PER_TASK=100,DATASET_NAME=c1_vpf,TEACHER_A=VP,TEACHER_B=F \
+  -v GAMES_PER_TASK=100,DATASET_NAME=c1_vpf,TEACHER_A=VP,TEACHER_B=F,BASE_SEED=0 \
   scripts/ucl/generate_data.qsub
 ```
+
+Array task `i` starts at `BASE_SEED + (i - 1) × GAMES_PER_TASK`, preventing duplicate trajectories across tasks. Each task writes an atomic 100-game Parquet shard.
 
 Each task writes to node-local `$TMPDIR` and copies one completed shard back to:
 

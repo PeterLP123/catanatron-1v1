@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import random
 import subprocess
 import sys
 import time
@@ -38,6 +39,7 @@ DEFAULT_BENCHMARK_OPPONENTS: tuple[str, ...] = (
     "M:200",
     "AB:2",
 )
+DEFAULT_EVAL_SEED = 20_260_701
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,7 @@ class EvalProtocol:
     opponents: tuple[str, ...]
     num_games: int
     description: str = ""
+    seed: int = DEFAULT_EVAL_SEED
 
 
 EVAL_PROTOCOLS: dict[str, EvalProtocol] = {
@@ -98,6 +101,7 @@ def get_eval_protocol(name: str, *, num_games: Optional[int] = None) -> EvalProt
         opponents=proto.opponents,
         num_games=num_games,
         description=proto.description,
+        seed=proto.seed,
     )
 
 
@@ -233,6 +237,7 @@ def _play_seat(
     colonist_1v1: bool,
     quiet: bool,
     agent_first: bool,
+    seed: int,
 ) -> _SeatStats:
     """Play ``num_games`` with the agent in a fixed seat and aggregate its results.
 
@@ -253,14 +258,20 @@ def _play_seat(
         number_placement="official_spiral",
         friendly_robber=False,
         colonist_1v1=colonist_1v1,
+        seed=seed,
+        shuffle_players=False,
     )
-    wins, vps_by_color, games = play_batch(
-        num_games,
-        players,
-        OutputOptions(),
-        game_config,
-        quiet=quiet,
-    )
+    random_state = random.getstate()
+    try:
+        wins, vps_by_color, games = play_batch(
+            num_games,
+            players,
+            OutputOptions(),
+            game_config,
+            quiet=quiet,
+        )
+    finally:
+        random.setstate(random_state)
 
     agent_player = players[0] if agent_first else players[1]
     opponent_player = players[1] if agent_first else players[0]
@@ -288,6 +299,7 @@ def evaluate_matchup(
     gate: Optional[float] = None,
     quiet: bool = True,
     both_seats: bool = True,
+    seed: int = DEFAULT_EVAL_SEED,
 ) -> MatchupResult:
     """
     Play ``num_games`` Colonist 1v1 games and report the agent's win rate.
@@ -314,6 +326,7 @@ def evaluate_matchup(
         colonist_1v1=colonist_1v1,
         quiet=quiet,
         agent_first=True,
+        seed=seed,
     )
     seat1 = (
         _play_seat(
@@ -323,6 +336,7 @@ def evaluate_matchup(
             colonist_1v1=colonist_1v1,
             quiet=quiet,
             agent_first=False,
+            seed=seed,
         )
         if seat1_games > 0
         else None
@@ -401,6 +415,7 @@ def build_eval_meta(
             "opponents": list(protocol.opponents),
             "num_games_per_matchup": protocol.num_games,
             "gates": DEFAULT_BENCHMARK_GATES,
+            "seed": protocol.seed,
         },
         "model": {
             "agent_spec": agent_spec,
@@ -466,6 +481,7 @@ def run_benchmark(
     training_timesteps: Optional[int] = None,
     command: Optional[Sequence[str]] = None,
     metadata: Optional[dict[str, Any]] = None,
+    seed: Optional[int] = None,
 ) -> EvaluationReport:
     """Run the full opponent battery and apply optional win-rate gates."""
     proto = (
@@ -475,6 +491,8 @@ def run_benchmark(
         opponents = proto.opponents
     if num_games is None:
         num_games = proto.num_games
+    if seed is None:
+        seed = proto.seed
     gates = gates or DEFAULT_BENCHMARK_GATES
     report = EvaluationReport(
         agent=agent_spec,
@@ -486,6 +504,7 @@ def run_benchmark(
                 opponents=tuple(opponents),
                 num_games=num_games,
                 description=proto.description,
+                seed=seed,
             ),
             eval_kind=eval_kind,
             run_dir=run_dir,
@@ -509,6 +528,7 @@ def run_benchmark(
             gate=gate,
             quiet=quiet,
             both_seats=both_seats,
+            seed=seed,
         )
         report.matchups.append(result)
         if gate is not None and result.passed_gate is False:

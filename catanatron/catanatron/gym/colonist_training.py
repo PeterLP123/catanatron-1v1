@@ -50,7 +50,7 @@ def resolve_teacher_parquet_paths(data_dir: Path) -> list[Path]:
     written at or after that marker. This avoids mixing stale runs in one folder.
     """
     data_dir = Path(data_dir)
-    paths = list(data_dir.glob("*.parquet"))
+    paths = [p for p in data_dir.glob("*.parquet") if not p.name.startswith(".")]
     if not paths:
         return []
 
@@ -78,6 +78,13 @@ def load_teacher_parquet(
     data_dirs = [Path(p) for p in data_dir] if isinstance(data_dir, Sequence) and not isinstance(data_dir, (str, bytes, Path)) else [Path(data_dir)]  # type: ignore[arg-type]
     paths: list[Path] = []
     for d in data_dirs:
+        meta_path = d / "dataset_meta.json"
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            if meta.get("status") not in {None, "complete"}:
+                raise ValueError(
+                    f"Dataset {d} is {meta.get('status')!r}; resume generation before training"
+                )
         paths.extend(resolve_teacher_parquet_paths(d))
     if not paths:
         raise FileNotFoundError(f"No .parquet files under {data_dirs}")
@@ -427,11 +434,16 @@ class CheckpointLeague:
 
     def _load_index(self) -> list[dict[str, Any]]:
         if self._index_path.exists():
-            return json.loads(self._index_path.read_text())
+            try:
+                return json.loads(self._index_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                return self._entries if hasattr(self, "_entries") else []
         return []
 
     def _save_index(self) -> None:
-        self._index_path.write_text(json.dumps(self._entries, indent=2))
+        tmp = self._index_path.with_name(f".{self._index_path.name}.tmp")
+        tmp.write_text(json.dumps(self._entries, indent=2))
+        os.replace(tmp, self._index_path)
 
     def register(
         self,
@@ -468,6 +480,9 @@ class CheckpointLeague:
         return str(dest)
 
     def paths(self) -> list[str]:
+        # Subprocess workers hold their own CheckpointLeague object. Reload the
+        # file-backed index so newly promoted checkpoints become visible.
+        self._entries = self._load_index()
         return [e["path"] for e in self._entries if Path(e["path"]).exists()]
 
     def sample_path(self, rng: Optional[np.random.Generator] = None) -> Optional[str]:
@@ -478,6 +493,7 @@ class CheckpointLeague:
         return str(r.choice(paths))
 
     def entries(self) -> list[dict[str, Any]]:
+        self._entries = self._load_index()
         return [dict(e) for e in self._entries if Path(e["path"]).exists()]
 
 
@@ -736,12 +752,19 @@ def write_dataset_metadata(
     if parquet_files is None:
         parquet_files = len(resolve_teacher_parquet_paths(output_dir))
     meta = {
+        "schema_version": "2.0",
+        "status": "complete",
         "teachers": teachers,
         "num_games": num_games,
+        "requested_games": num_games,
+        "completed_games": num_games,
         "parquet_files": parquet_files,
         "command": command,
         "colonist_1v1": True,
     }
     if extra:
         meta.update(extra)
-    (output_dir / "dataset_meta.json").write_text(json.dumps(meta, indent=2))
+    path = output_dir / "dataset_meta.json"
+    tmp = output_dir / ".dataset_meta.json.tmp"
+    tmp.write_text(json.dumps(meta, indent=2, sort_keys=True))
+    os.replace(tmp, path)

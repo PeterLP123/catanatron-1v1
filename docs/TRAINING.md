@@ -34,19 +34,24 @@ Use a separate `runs/<name>` directory for each experiment. A run directory is b
 python examples/colonist_1v1_generate_data.py \
   --num 5000 \
   --teachers F,F \
+  --seed 0 \
   --output data/c1_ff
 ```
 
-The script invokes `catanatron-play --colonist-1v1` and writes one Parquet file per game plus `dataset_meta.json`. Prefer `F`, `VP`, or a deliberately chosen search player over weak random teachers.
+The script invokes the active Python interpreter, uses deterministic seeds, and writes atomic 100-game Parquet shards plus `dataset_meta.json`. Re-run an interrupted matching configuration with `--resume`. Prefer `F`, `VP`, or a deliberately chosen search player over weak random teachers. The generic `catanatron-play` command retains its one-file-per-game default for compatibility.
 
 | Option | Meaning |
 |---|---|
 | `--num` | Number of games; default `100` |
 | `--teachers` | Exactly two player specifications; default `F,F` |
 | `--output` | Dataset directory |
+| `--seed` | Base game seed; game `i` uses `seed + i`; default `0` |
+| `--shard-games` | Games per atomic Parquet shard; default `100` |
+| `--resume` | Validate metadata and continue an interrupted dataset |
+| `--choices-only` | Drop forced actions while writing; off by default |
 | `--include-board-tensor` | Include the larger board-tensor feature set |
 
-Reusing a directory creates a new `.colonist_run_started` marker. The loader uses the marker and metadata to avoid silently mixing older files into the next BC run.
+The generator refuses to reuse a populated directory unless `--resume` is supplied. Resume validates teachers, seed, requested games and schema-affecting options before continuing from the next seed.
 
 ## 2. Behavioral cloning
 
@@ -101,6 +106,7 @@ Important options:
 | `--league-checkpoints` | Seed the league with existing checkpoints |
 | `--league-size` | Maximum rolling checkpoint count; default `8` |
 | `--visible-vp-reward` | Shape rewards using public rather than actual VP |
+| `--vec-env` | `auto`, `dummy`, or `subproc`; auto uses subprocesses for multiple envs |
 | `--skip-final-eval` | Skip the post-training report for quick iterations |
 
 MaskablePPO receives only legal actions. The default shaped reward is terminal `+1/-1` plus `0.02 ×` the learning player's victory-point change.
@@ -132,9 +138,9 @@ If `--num-games` is omitted, the selected protocol supplies the count per oppone
 | `milestone` | R, W, VP, F, G:25 | 100 | Model promotion decisions |
 | `full` | R, W, VP, F, G:25, M:200, AB:2 | 200 | Expensive final comparison |
 
-`--gates` applies the repository's current minimum win rates: 90% vs R, 70% vs W, 60% vs VP, and 52% vs F, G:25, M:200, and AB:2. Reports include Wilson score intervals, average victory-point margin, and a weighted score.
+`--gates` applies the repository's current minimum win rates: 90% vs R, 70% vs W, 60% vs VP, and 52% vs F, G:25, M:200, and AB:2. Protocols use a fixed seed schedule by default, and reports record it alongside Wilson score intervals, average victory-point margin, and a weighted score. Override with `--seed` only when deliberately creating another evaluation replicate.
 
-These are regression benchmarks, not a neutral tournament rating. The evaluated agent occupies the first seat and the simulator is only an approximation of an external service. Compare models with the same protocol, commit, and rule settings.
+These are regression benchmarks, not a neutral tournament rating. The evaluated agent plays both explicitly fixed seats by default, and the simulator is only an approximation of an external service. Compare models with the same protocol seed, commit, and rule settings.
 
 ## Run artifacts
 

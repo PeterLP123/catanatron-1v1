@@ -1,4 +1,4 @@
-.PHONY: install test test-1v1 smoke train evaluate tui
+.PHONY: install test test-1v1 test-gpu-ready smoke train evaluate tui
 
 PYTHON ?= python3
 RUN_DIR ?= runs/colonist_1v1
@@ -11,6 +11,16 @@ test:
 
 test-1v1:
 	$(PYTHON) -m pytest tests/test_colonist_1v1.py tests/test_colonist_1v1_training.py tests/test_colonist_1v1_gym_training.py
+
+test-gpu-ready:
+	$(PYTHON) -m pytest \
+		tests/test_gpu_readiness.py \
+		tests/test_experiment_backlog.py \
+		tests/test_colonist_1v1_training.py \
+		tests/test_colonist_1v1_gym_training.py \
+		tests/machine_learning/test_dataset_v2.py \
+		tests/machine_learning/test_leaf_evaluation.py \
+		tests/machine_learning/test_mcts.py
 
 smoke:
 	$(PYTHON) examples/colonist_1v1_train.py --preset smoke --run-dir $(RUN_DIR) --skip-final-eval

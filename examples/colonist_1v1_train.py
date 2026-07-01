@@ -19,6 +19,7 @@ Full run (after BC data + optional --bc-checkpoint)::
 from __future__ import annotations
 
 import argparse
+import multiprocessing
 import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -321,6 +322,18 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--run-id", default=None)
     p.add_argument("--progress-freq", type=int, default=5_000)
     p.add_argument(
+        "--vec-env",
+        choices=("auto", "dummy", "subproc"),
+        default="auto",
+        help="Vector environment backend; auto uses subprocesses when n-envs > 1.",
+    )
+    p.add_argument(
+        "--vec-start-method",
+        choices=("auto", "spawn", "forkserver", "fork"),
+        default="auto",
+        help="Multiprocessing start method for SubprocVecEnv.",
+    )
+    p.add_argument(
         "--league-checkpoints",
         type=Path,
         nargs="*",
@@ -340,24 +353,32 @@ def main(argv: list[str] | None = None) -> None:
         args.mixed_league = True
 
     args.run_dir.mkdir(parents=True, exist_ok=True)
+    training_manifest = {
+        "timesteps": args.timesteps,
+        "requested_timesteps": args.timesteps,
+        "starting_timesteps": 0,
+        "n_envs": args.n_envs,
+        "save_freq": args.save_freq,
+        "eval_freq": args.eval_freq,
+        "eval_games": args.eval_games,
+        "eval_protocol": args.eval_protocol,
+        "final_eval_protocol": args.final_eval_protocol,
+        "mixed_league": args.mixed_league,
+        "curriculum": args.curriculum,
+        "seed": args.seed,
+        "visible_vp_reward": args.visible_vp_reward,
+        "randomize_seats": args.randomize_seats,
+        "teacher_codes": args.teacher_codes,
+        "hidden": list(args.hidden),
+        "vec_env_requested": args.vec_env,
+        "vec_start_method_requested": args.vec_start_method,
+    }
     tracker = TrainingRunTracker(
         args.run_dir,
         run_id=args.run_id,
         preset=args.preset,
         command=sys.argv if argv is None else ["colonist_1v1_train.py", *argv],
-        extra={
-            "training": {
-                "timesteps": args.timesteps,
-                "n_envs": args.n_envs,
-                "save_freq": args.save_freq,
-                "eval_freq": args.eval_freq,
-                "eval_games": args.eval_games,
-                "eval_protocol": args.eval_protocol,
-                "final_eval_protocol": args.final_eval_protocol,
-                "mixed_league": args.mixed_league,
-                "curriculum": args.curriculum,
-            }
-        },
+        extra={"training": training_manifest},
     )
     tracker.phase("initializing")
     registry_path = args.registry or (args.run_dir / MODEL_REGISTRY_NAME)
@@ -392,7 +413,28 @@ def main(argv: list[str] | None = None) -> None:
                 for s in curriculum.stages
             )
         )
-    step_state = {"timesteps": 0}
+    requested_vec_env = args.vec_env
+    resolved_vec_env = (
+        "subproc"
+        if requested_vec_env == "auto" and args.n_envs > 1
+        else requested_vec_env
+    )
+    if resolved_vec_env == "auto":
+        resolved_vec_env = "dummy"
+    available_methods = multiprocessing.get_all_start_methods()
+    if args.vec_start_method == "auto":
+        resolved_start_method = (
+            "forkserver" if "forkserver" in available_methods else "spawn"
+        )
+    else:
+        resolved_start_method = args.vec_start_method
+
+    manager = None
+    if resolved_vec_env == "subproc":
+        manager = multiprocessing.Manager()
+        step_state = manager.dict(timesteps=0)
+    else:
+        step_state = {"timesteps": 0}
 
     def make_env_fn(rank: int = 0):
         def env_fn():
@@ -408,6 +450,7 @@ def main(argv: list[str] | None = None) -> None:
                         else ("F", "VP", "W")
                     ),
                     telemetry=tracker if rank == 0 else None,
+                    rng=np.random.default_rng(env_seed),
                 )
                 return make_colonist_env(
                     seed=env_seed,
@@ -434,16 +477,55 @@ def main(argv: list[str] | None = None) -> None:
         # Kept for single-env use and backward compatibility with tests/importers.
         return make_env_fn(0)()
 
-    if args.n_envs > 1:
+    vec_fallback_reason = None
+    if resolved_vec_env == "subproc":
+        from stable_baselines3.common.vec_env import SubprocVecEnv
+
+        try:
+            env = SubprocVecEnv(
+                [make_env_fn(i) for i in range(args.n_envs)],
+                start_method=resolved_start_method,
+            )
+        except Exception as exc:
+            vec_fallback_reason = f"{type(exc).__name__}: {exc}"
+            print(
+                f"WARNING: SubprocVecEnv failed ({vec_fallback_reason}); falling back to DummyVecEnv.",
+                file=sys.stderr,
+            )
+            tracker.event("vec_env_fallback", reason=vec_fallback_reason)
+            if manager is not None:
+                manager.shutdown()
+                manager = None
+            step_state = {"timesteps": 0}
+            from stable_baselines3.common.vec_env import DummyVecEnv
+
+            env = DummyVecEnv([make_env_fn(i) for i in range(args.n_envs)])
+            resolved_vec_env = "dummy"
+            resolved_start_method = None
+    elif args.n_envs > 1:
         from stable_baselines3.common.vec_env import DummyVecEnv
 
         env = DummyVecEnv([make_env_fn(i) for i in range(args.n_envs)])
+        resolved_start_method = None
     else:
         env = env_fn()
+        resolved_start_method = None
+
+    training_manifest.update(
+        {
+            "vec_env": resolved_vec_env,
+            "vec_start_method": resolved_start_method,
+            "vec_fallback_reason": vec_fallback_reason,
+        }
+    )
+    tracker.update_manifest(training=training_manifest)
 
     if args.resume_checkpoint is not None:
         tracker.phase("loading_resume", checkpoint=str(args.resume_checkpoint))
         model = MaskablePPO.load(str(args.resume_checkpoint), env=env, seed=args.seed)
+        training_manifest["starting_timesteps"] = int(model.num_timesteps)
+        training_manifest["timesteps"] = int(model.num_timesteps) + args.timesteps
+        tracker.update_manifest(training=training_manifest)
     else:
         model = MaskablePPO(
             MaskableActorCriticPolicy,
@@ -540,6 +622,9 @@ def main(argv: list[str] | None = None) -> None:
         )
         print(f"Final benchmark -> {report_path}")
     tracker.phase("done")
+    env.close()
+    if manager is not None:
+        manager.shutdown()
 
 
 if __name__ == "__main__":

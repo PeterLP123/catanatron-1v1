@@ -6,6 +6,12 @@ Compare only within the same protocol / rules. Win rates are **two-seat** (the a
 is the per-seat win rate; a large gap flags a one-seat specialist (not human-like — see
 [docs/PLAN.md](PLAN.md) Phase 3).
 
+> **Seat-order correction — 2026-07-01.** The evaluator previously reversed the supplied
+> player list, but `State` shuffled that list again when each game started. Historical aggregate
+> win rates still represent mixed-seat performance, but historical `seat0/seat1` splits are not
+> trustworthy. New evaluations preserve explicit order and use fixed seed schedules; re-run a
+> checkpoint before making a seat-balance decision.
+
 ---
 
 ## 500k baseline — `runs/ec2_proxy_500k` (Phase 0 reference)

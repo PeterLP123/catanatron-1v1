@@ -264,7 +264,7 @@ class Board:
             if self.get_edge_color(edge) is None:
                 expandable.add(tuple(sorted(edge)))
 
-        self.buildable_edges_cache[color] = list(expandable)
+        self.buildable_edges_cache[color] = sorted(expandable)
         return self.buildable_edges_cache[color]
 
     def get_player_port_resources(self, color):

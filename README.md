@@ -71,6 +71,8 @@ python examples/colonist_1v1_evaluate.py \
 
 See [the training guide](docs/TRAINING.md) for presets, artifacts, evaluation caveats, and troubleshooting.
 
+UCL users can run the project on [Computer Science RTX GPU hosts](docs/UCL_CS_GPUS.md) or on [Myriad's scheduled V100/A100 nodes](docs/UCL_MYRIAD.md). Both guides include supplied setup and job templates. The [gated GPU experiment backlog](docs/GPU_EXPERIMENT_BACKLOG.md) provides matched runs, resource estimates and promotion rules.
+
 ## Rules preset
 
 The preset currently configures exactly two players, 15 victory points, the base map with official number placement, balanced dice, a friendly robber threshold based on visible victory points, and a 9-card discard limit. The implementation is documented in [the rules reference](docs/RULES.md).

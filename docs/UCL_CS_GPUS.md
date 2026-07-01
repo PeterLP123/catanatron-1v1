@@ -149,13 +149,24 @@ Ctrl-B then 0/1/2   select training/dashboard/gpu
 Ctrl-B then D       detach without stopping training
 ```
 
-The dashboard refreshes every two seconds. Its own shortcuts include `3` for Monitor, `4` for Ranking, `6` for Logs, `r` to refresh and `q` to close only the dashboard process.
+The dashboard refreshes every two seconds and reports rolling steps/second, ETA, elapsed time, seed, vector backend and worker count. It warns when training has not emitted progress for 15 minutes. Its shortcuts include `3` for Monitor, `4` for Ranking, `6` for Logs, `7` for the experiment backlog, `r` to refresh and `q` to close only the dashboard process.
 
 Reconnect after closing SSH:
 
 ```bash
 tmux attach -t catan-ucl_cs_standard_v1
 ```
+
+For controlled research runs, use the executable [GPU experiment backlog](GPU_EXPERIMENT_BACKLOG.md) instead of inventing run names and settings manually:
+
+```bash
+source "$HOME/.venvs/catanatron-1v1/bin/activate"
+python examples/colonist_1v1_backlog.py list
+python examples/colonist_1v1_backlog.py next
+python examples/colonist_1v1_backlog.py start 00-gpu-smoke
+```
+
+Each backlog ID maps to a reproducible seed and configuration while retaining the same dashboard, GPU monitor and detach/reattach workflow.
 
 Render a compact progress snapshot without opening the full-screen interface:
 
@@ -197,6 +208,17 @@ TRAIN_PRESET=standard RUN_NAME=ucl_cs_standard_v1_resume \
 ```
 
 The current standard run should fit comfortably on both 16 GB and 24 GB hosts. Do not run the `strong` or `overnight` presets on a lab PC until checkpoint intervals and host reboot risk have been reviewed.
+
+Measure the host before changing worker counts:
+
+```bash
+source "$HOME/.venvs/catanatron-1v1/bin/activate"
+python examples/colonist_1v1_env_benchmark.py \
+  --n-envs 4 --steps 500 \
+  --report runs/environment_benchmark.json
+```
+
+Training uses subprocess environments automatically when a preset requests more than one environment. Small worker counts can be slower due to inter-process overhead, so use the measured decisions/second rather than assuming more processes are better.
 
 ## 7. Data and evaluation
 

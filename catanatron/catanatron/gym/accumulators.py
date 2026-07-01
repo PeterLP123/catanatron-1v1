@@ -1,5 +1,7 @@
 import os
 import time
+import json
+import random
 from collections import defaultdict
 from typing import Tuple, Literal
 
@@ -56,7 +58,13 @@ class ReinforcementLearningAccumulator(GameAccumulator):
 
     def _ensure_action_index(self):
         if self._action_index is None:
-            actions_array = get_action_array(self.player_colors, self.map_type)
+            random_state = random.getstate()
+            try:
+                actions_array = get_action_array(self.player_colors, self.map_type)
+            finally:
+                # Lazy action-space construction may initialize cached game
+                # structures; dataset instrumentation must never change play.
+                random.setstate(random_state)
             self._action_index = {pair: i for i, pair in enumerate(actions_array)}
 
     def _legal_and_candidates(self, game, color):
@@ -81,13 +89,19 @@ class ReinforcementLearningAccumulator(GameAccumulator):
 
         legal_indices = []
         cand_values = []
-        for action in playable:
-            idx = self._action_index.get((action.action_type, action.value))
-            if idx is None:
-                continue
-            legal_indices.append(idx)
-            if score:
-                cand_values.append(action_value(game, action, color, value_fn))
+        random_state = random.getstate()
+        try:
+            for action in playable:
+                idx = self._action_index.get((action.action_type, action.value))
+                if idx is None:
+                    continue
+                legal_indices.append(idx)
+                if score:
+                    cand_values.append(action_value(game, action, color, value_fn))
+        finally:
+            # Candidate labelling is observational and must not perturb the
+            # actual game's dice, deck or player choices.
+            random.setstate(random_state)
         return legal_indices, cand_values
 
     def before(self, game):
@@ -274,6 +288,10 @@ class ParquetDataAccumulator(ReinforcementLearningAccumulator):
         include_board_tensor=True,
         score_candidates=False,
         value_fn_name="base_fn",
+        shard_games=1,
+        choices_only=False,
+        start_shard_index=0,
+        dataset_meta=None,
     ):
         super().__init__(
             player_colors,
@@ -283,19 +301,82 @@ class ParquetDataAccumulator(ReinforcementLearningAccumulator):
             value_fn_name=value_fn_name,
         )
         self.output = output
+        self.shard_games = max(1, int(shard_games))
+        self.choices_only = bool(choices_only)
+        self._shard_index = int(start_shard_index)
+        self.dataset_meta = dataset_meta
+        self._shard_frames = []
+        self._shard_game_count = 0
+
+    def before_all(self):
+        self._shard_frames = []
+        self._shard_game_count = 0
+        # Warm lazy action-space caches before play_batch applies the first
+        # deterministic game seed.
+        self._ensure_action_index()
+
+    def _update_progress(self, *, games: int, rows: int, files: int):
+        if not self.dataset_meta:
+            return
+        path = os.fspath(self.dataset_meta)
+        try:
+            with open(path, encoding="utf-8") as f:
+                meta = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            meta = {}
+        meta["completed_games"] = int(meta.get("completed_games", 0)) + games
+        meta["rows"] = int(meta.get("rows", 0)) + rows
+        meta["parquet_files"] = int(meta.get("parquet_files", 0)) + files
+        base_seed = meta.get("seed")
+        if isinstance(base_seed, int):
+            meta["next_seed"] = base_seed + meta["completed_games"]
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2, sort_keys=True)
+        os.replace(tmp, path)
+
+    def _write_shard(self):
+        if self._shard_game_count == 0:
+            return
+        games = self._shard_game_count
+        if not self._shard_frames:
+            self._update_progress(games=games, rows=0, files=0)
+            self._shard_game_count = 0
+            return
+        main_df = pd.concat(self._shard_frames, ignore_index=True)
+        if self.choices_only:
+            main_df = main_df[main_df["NUM_LEGAL"] > 1].reset_index(drop=True)
+        if self.shard_games == 1 and len(self._shard_frames) == 1:
+            # Preserve the generic catanatron-play one-file-per-game contract.
+            game_id = str(self._shard_frames[0]["GAME_ID"].iloc[0])
+            filename = f"{game_id}.parquet"
+        else:
+            filename = f"shard-{self._shard_index:05d}.parquet"
+        filepath = os.path.join(self.output, filename)
+        tmp_path = os.path.join(self.output, f".{filename}.tmp.parquet")
+        main_df.to_parquet(tmp_path, index=False)
+        os.replace(tmp_path, filepath)
+        self._update_progress(games=games, rows=len(main_df), files=1)
+        print(f"Saved {filepath} with {games} game(s), {len(main_df)} row(s)")
+        self._shard_index += 1
+        self._shard_frames = []
+        self._shard_game_count = 0
+
+    def after_all(self):
+        self._write_shard()
 
     def after(self, game):
         data = super().after(game)
+        self._shard_game_count += 1
         if data is None:
+            if self._shard_game_count >= self.shard_games:
+                self._write_shard()
             return
 
-        t1 = time.time()
         # Lead with the dataset v2 metadata columns (GAME_ID, SEAT, PHASE,
         # NUM_LEGAL, LEGAL_ACTIONS) so grouped splits and decision metrics work.
         main_df = pd.concat([data["meta_df"], data["main_df"]], axis=1)
-        filepath = os.path.join(self.output, f"{game.id}.parquet")
-        main_df.to_parquet(filepath, index=False)
-        print(
-            f"Saved main_df to {self.output} with shapes {main_df.shape} in {format_secs(time.time() - t1)}"
-        )
+        self._shard_frames.append(main_df)
+        if self._shard_game_count >= self.shard_games:
+            self._write_shard()
         return main_df
