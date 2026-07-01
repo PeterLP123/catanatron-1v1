@@ -98,6 +98,74 @@ def test_self_play_env_swaps_opponent():
     assert wrapped.env.unwrapped.enemies[0] is opponent
 
 
+def test_seat_randomization_disabled_by_default():
+    """p0 always moves first unless randomize_seats is explicitly enabled."""
+    env = CatanatronEnv(
+        config={"colonist_1v1": True, "enemies": [WeightedRandomPlayer(Color.RED)]}
+    )
+    env.reset(seed=0)
+    for _ in range(20):
+        env.reset()
+        assert env.players[0] is env.p0
+
+
+def test_seat_randomization_reaches_both_seats():
+    env = CatanatronEnv(
+        config={
+            "colonist_1v1": True,
+            "enemies": [WeightedRandomPlayer(Color.RED)],
+            "randomize_seats": True,
+        }
+    )
+    env.reset(seed=0)
+    seats = {env.players.index(env.p0)}
+    for _ in range(40):
+        env.reset()
+        seats.add(env.players.index(env.p0))
+    assert seats == {0, 1}
+
+
+def test_seat_randomization_does_not_change_observation_or_action_shape():
+    """p0's color (and hence observation/action encoding) never changes -- only
+    turn order does -- so shapes must match regardless of which seat is drawn."""
+    make = lambda: CatanatronEnv(
+        config={"colonist_1v1": True, "enemies": [WeightedRandomPlayer(Color.RED)]}
+    )
+    seat_first = make()
+    seat_second = make()
+    obs_first, _ = seat_first.reset(seed=0)
+
+    # Force the second env's agent to seat 1 (moves second) without enabling
+    # randomize_seats, so reset() won't redraw and clobber the manual choice.
+    seat_second._p0_seat_index = 1
+    obs_second, _ = seat_second.reset(seed=0)
+    assert seat_second.players.index(seat_second.p0) == 1
+
+    assert obs_first.shape == obs_second.shape
+    assert seat_first.observation_space.shape == seat_second.observation_space.shape
+    assert seat_first.action_space.n == seat_second.action_space.n
+    assert len(seat_first.action_masks()) == len(seat_second.action_masks())
+
+
+def test_self_play_env_respects_randomized_seat():
+    base = CatanatronEnv(
+        config={
+            "colonist_1v1": True,
+            "enemies": [WeightedRandomPlayer(Color.RED)],
+            "randomize_seats": True,
+        }
+    )
+    opponent = WeightedRandomPlayer(Color.RED)
+    wrapped = SelfPlayEnv(base, opponent=opponent)
+    seats = set()
+    for i in range(40):
+        wrapped.reset(seed=i)
+        u = wrapped.env.unwrapped
+        assert u.enemies[0] is opponent
+        seats.add(u.players.index(u.p0))
+    assert seats == {0, 1}
+
+
 def test_checkpoint_league_register_and_prune(tmp_path):
     league = CheckpointLeague(tmp_path, max_checkpoints=2)
     f1 = tmp_path / "a.zip"

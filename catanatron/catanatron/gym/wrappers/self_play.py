@@ -180,7 +180,10 @@ class SelfPlayEnv(gym.Wrapper):
     def _apply_opponent(self, opponent: Player) -> None:
         u = self.env.unwrapped
         u.enemies = [opponent]
-        u.players = [u.p0] + u.enemies
+        # Rebuild via the env's own helper so any seat order already drawn
+        # (randomize_seats=True) is respected instead of always putting p0
+        # first. The next reset() redraws the seat if randomization is on.
+        u._rebuild_players()
 
     def reset(self, **kwargs: Any):
         if self._league_paths:

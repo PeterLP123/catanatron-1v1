@@ -77,7 +77,13 @@ class CatanatronEnv(gym.Env):
             assert len(self.enemies) == 1, "Colonist 1v1 requires exactly one enemy"
 
         self.p0 = Player(Color.BLUE)
-        self.players = [self.p0] + self.enemies  # type: ignore
+        # Whether to draw a random turn order each reset (D-04: without this,
+        # p0 always moves first, so first-mover advantage/disadvantage is never
+        # learned, only exploited or suffered identically every episode). Off by
+        # default so existing callers keep today's behavior.
+        self.randomize_seats = self.config.get("randomize_seats", False)
+        self._p0_seat_index = 0
+        self._rebuild_players()
         self.representation = "mixed" if self.representation == "mixed" else "vector"
         self.features = get_feature_ordering(len(self.players), self.map_type)
         self.invalid_actions_count = 0
@@ -114,6 +120,19 @@ class CatanatronEnv(gym.Env):
             )
 
         self.reset()
+
+    def _rebuild_players(self):
+        """Rebuild ``self.players`` from ``self.enemies`` with ``p0`` inserted at
+        ``self._p0_seat_index``. Turn order (including initial snake placement)
+        follows list order, not color, so this is the only thing that needs to
+        change to randomize who moves first -- ``self.p0.color`` and
+        ``self.player_colors`` stay fixed, so observation/action-space shape and
+        semantics are unaffected.
+        """
+        players = list(self.enemies)
+        idx = min(self._p0_seat_index, len(players))
+        players.insert(idx, self.p0)
+        self.players = players  # type: ignore
 
     def get_valid_actions(self):
         """
@@ -176,6 +195,14 @@ class CatanatronEnv(gym.Env):
         options=None,
     ):
         super().reset(seed=seed)
+
+        if self.randomize_seats:
+            # self.np_random is (re)seeded by super().reset() above when seed is
+            # given, and otherwise keeps advancing across resets -- so a training
+            # loop that calls reset() without a seed each episode still draws a
+            # fresh order every time.
+            self._p0_seat_index = int(self.np_random.integers(0, len(self.enemies) + 1))
+        self._rebuild_players()
 
         if seed is not None:
             # Ensure map generation uses the same seed as the game.

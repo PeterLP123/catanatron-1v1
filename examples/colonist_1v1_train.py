@@ -71,6 +71,7 @@ def make_colonist_env(
     opponent: Optional[Any] = None,
     opponent_factory: Optional[Callable] = None,
     league_paths: Optional[list[str]] = None,
+    randomize_seats: bool = True,
 ) -> gym.Env:
     cfg = Colonist1v1TrainConfig(seed=seed)
     enemies = [opponent or WeightedRandomPlayer(Color.RED)]
@@ -84,6 +85,7 @@ def make_colonist_env(
             "representation": "vector",
             "enemies": enemies,
             "reward_function": reward_fn,
+            "randomize_seats": randomize_seats,
         },
     )
     if league_paths:
@@ -281,6 +283,13 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Use public VP for shaping instead of actual VP.",
     )
+    p.add_argument(
+        "--no-randomize-seats",
+        dest="randomize_seats",
+        action="store_false",
+        default=True,
+        help="Disable seat randomization (legacy: the agent always moves first).",
+    )
     p.add_argument("--league-size", type=int, default=8)
     p.add_argument(
         "--curriculum",
@@ -404,14 +413,20 @@ def main(argv: list[str] | None = None) -> None:
                     seed=env_seed,
                     reward_fn=reward_fn,
                     opponent_factory=factory,
+                    randomize_seats=args.randomize_seats,
                 )
             if league.paths():
                 return make_colonist_env(
                     seed=env_seed,
                     reward_fn=reward_fn,
                     league_paths=league.paths(),
+                    randomize_seats=args.randomize_seats,
                 )
-            return make_colonist_env(seed=env_seed, reward_fn=reward_fn)
+            return make_colonist_env(
+                seed=env_seed,
+                reward_fn=reward_fn,
+                randomize_seats=args.randomize_seats,
+            )
 
         return env_fn
 
