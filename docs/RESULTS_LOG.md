@@ -3,8 +3,8 @@
 Two-seat scorecards for each run, so local and cloud runs stay comparable across commits.
 Compare only within the same protocol / rules. Win rates are **two-seat** (the agent plays
 `num_games/2` as the first seat and `num_games/2` as the second) unless noted. `seat[s0/s1]`
-is the per-seat win rate; a large gap flags a one-seat specialist (not human-like — see
-[docs/PLAN.md](PLAN.md) Phase 3).
+is the per-seat win rate; a large gap flags a one-seat specialist (not human-like; see the
+[current execution plan](PLAN.md#current-execution-plan)).
 
 > **Seat-order correction — 2026-07-01.** The evaluator previously reversed the supplied
 > player list, but `State` shuffled that list again when each game started. Historical aggregate
@@ -22,7 +22,8 @@ is the per-seat win rate; a large gap flags a one-seat specialist (not human-lik
 - **Protocol:** `full`, 200 games/opponent, two-seat (`both_seats=True`)
 - **Report:** `runs/ec2_proxy_500k/eval_two_seat_no_m200.json`
 - **Deferred to cloud:** `G:25` (~90s+/game) and `M:200` (~2min/game) — too slow locally;
-  see Phase 2. `AB:2` is the only search bot fast enough to run locally.
+  see the [GPU experiment backlog](GPU_EXPERIMENT_BACKLOG.md). `AB:2` is the only search bot
+  fast enough to run locally.
 
 | Opponent | Gate | Win rate | seat0 / seat1 | VP diff | Result |
 |---|---|---|---|---|---|
@@ -39,21 +40,21 @@ Weighted score 0.396; 3/5 local gates passed.
 **Findings**
 
 - **Crushed by the value-function bots.** 0.5% vs `F` and 0% vs `AB:2` (which shares F's
-  hand-crafted value function), losing by ~11 VP in short ~85-turn games. This is the Phase 1
-  problem to solve: the self-play–leaning 500k run never learned to beat real heuristic play.
+  hand-crafted value function), losing by ~11 VP in short ~85-turn games. This established the
+  decision-margin problem: the self-play–leaning 500k run never learned to beat real heuristic play.
 - **Seat imbalance on the weak baselines.** The model is ~10–17 pts *stronger* in seat 1
   (second player) than seat 0 across R/W/VP. The old first-seat-only numbers (R 88 / W 78 /
   VP 78) essentially reported the model's *weaker* seat — so the prior measurement understated
   the weak-baseline win rates while the F result (0) was unaffected. Seat balance becomes a
-  first-class gate in Phase 3.
+  first-class gate in the [current plan](PLAN.md#decision-gates).
 
 ---
 
 ## Phase 1 — the F wall (negative results, 2026-06-29)
 
 Phase 1 set out to beat `F` (ValueFunctionPlayer) via diverse-teacher BC → PPO. **Four
-independent methods all failed at ~0% vs F**, which redirected the project (see the banner
-in [PLAN.md](PLAN.md)). All numbers two-seat.
+independent methods all failed at ~0% vs F**, which produced the current gated strategy in
+[PLAN.md](PLAN.md). All numbers two-seat.
 
 | Method | Artifact | vs F | vs R / W / VP | Note |
 |---|---|---|---|---|
@@ -76,15 +77,14 @@ plays to **15 VP**; `colonist_1v1=True` overrides evaluate_matchup's `vps_to_win
 
 ---
 
-## Deliverable — human-like reactive bot (revised bar, 2026-06-29)
+## Best available human-like reactive bot (partial deliverable, 2026-06-29)
 
-After the F wall, the goal was redefined: a **human-like reactive bot** that convincingly
-beats the weak/random tiers, plays naturally (no superhuman lookahead), and is
-competitive-but-not-dominant vs the hand-crafted lookahead bots. **Chosen agent:
-`runs/v2_ppo_fheavy/colonist_maskable_ppo.zip`** — the best human-like candidate: highest
-on R and the **most seat-balanced** of our agents (the 500k baseline had 10–17pt seat gaps;
-this one is within ~9pt), a side-benefit of training heavily against F even though it never
-beat F.
+After the F wall, the target became a **human-like reactive bot** that convincingly beats the
+weak/random tiers, plays naturally (no superhuman lookahead), and is competitive-but-not-dominant
+vs the hand-crafted lookahead bots. That complete target is not yet met. The best current
+candidate is **`runs/v2_ppo_fheavy/colonist_maskable_ppo.zip`**: it is strongest against R and
+the **most seat-balanced** of our agents (the 500k baseline had 10–17pt seat gaps; this one is
+within ~9pt), a side-benefit of training heavily against F even though it never beat F.
 
 - **Protocol:** 200 games/opponent, two-seat. R/W/VP/F/AB:2 (G:25, M:200 deferred — cloud).
 
@@ -96,8 +96,8 @@ beat F.
 | F    | 1.0%  | 1% / 1%   | −10.10 | lookahead — not competitive |
 | AB:2 | 0.5%  | 0% / 1%   | −10.50 | lookahead — not competitive |
 
-Meets the redefined bar on the beatable tiers with good seat balance; F/AB remain the
-stretch track below.
+This meets the weak-tier portion of the target with good seat balance. The full deliverable
+remains open because F/AB are not yet competitive; they remain the stretch track below.
 
 ### Stretch track — beating F (future, out of local scope)
 
@@ -106,5 +106,5 @@ margin**, which naive outcome-regression and 500k model-free RL do not provide. 
 approach is **AlphaZero-style**: a policy+value net trained by iterated self-play + MCTS,
 with **value targets bootstrapped from search** (not raw game outcomes), likely needing cloud
 compute. This is a multi-session research effort with uncertain payoff on this hardware and is
-intentionally deferred. The Phase 0 two-seat eval and this results log are the comparison
-harness for that work when/if it starts.
+intentionally deferred. The corrected two-seat evaluation and this results log are the
+comparison harness for that work when/if it starts.

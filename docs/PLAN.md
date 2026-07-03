@@ -1,153 +1,157 @@
-# Plan: toward a robust, human-like 1v1 Catan bot
+# Plan: GPU-gated path to a stronger 1v1 bot
 
-> **Revised direction — 2026-06-29.** The original Phase 1 below (diverse-teacher BC →
-> PPO → beat F) was executed and **F proved to be a hard wall**: four independent methods
-> all land at ~0% vs `F` (self-play PPO 500k, BC on 5.4M samples, PPO trained *directly*
-> against F, and a model-based 1-ply lookahead with a *learned* value net). The decisive
-> result is the last one — it is mechanically identical to F (same `game.copy/execute`
-> lookahead) and differs only in the value function, yet it loses to F and can't even beat
-> Random. **So the wall is value-function quality at the decision margin, not architecture
-> or scale.** Full evidence + scorecards: [RESULTS_LOG.md](RESULTS_LOG.md).
->
-> **Decision:** redefine the bar to a *human-like* reactive bot — convincingly beats the
-> weak/random tiers (R/W/VP), plays naturally, and is competitive-but-not-dominant vs the
-> hand-crafted lookahead bots (F/AB). **Beating F is moved to a separate research track**
-> (AlphaZero-style self-play + search with bootstrapped value targets; needs real compute,
-> uncertain payoff) — see "Stretch track" in RESULTS_LOG.md. Phase 0's trustworthy
-> two-seat evaluation stands and underpins the new bar. The phases below are retained for
-> historical context.
+> **Current as of 2026-07-03.** This document records the project direction,
+> evidence, and promotion gates. The executable run order and commands live in
+> [GPU_EXPERIMENT_BACKLOG.md](GPU_EXPERIMENT_BACKLOG.md); measured outcomes live in
+> [RESULTS_LOG.md](RESULTS_LOG.md). If the documents disagree about an experiment,
+> the backlog definition in `catanatron.gym.experiment_backlog` is authoritative.
 
-## Context
+## Where the project stands
 
-The strongest existing model (`runs/ec2_proxy_500k`, 500k PPO steps) beats the weak
-baselines (R 88%, W 78%, VP 78%) but **loses 0/100 to `F`**, the hand-crafted value bot,
-averaging just 3.9 VP. Three root causes, established by reading the run artifacts and code:
+The simulator and training platform are ready for the first GPU run. The current best
+reactive policy, `runs/v2_ppo_fheavy/colonist_maskable_ppo.zip`, is strong against the
+weak tiers and reasonably balanced between seats, but it is not competitive with the
+hand-crafted lookahead tier.
 
-1. **No BC warm-start** — that run has no `bc.*` artifacts; PPO learned from scratch.
-2. **Self-play–leaning opponent mix** — its `league/` holds only its own checkpoints; the
-   policy converged to beat clones of itself and collapses against real heuristic play.
-3. **Biased measurement** — `evaluate_matchup` (`colonist_1v1_eval.py:204-214`) always seats
-   the agent first, so every win rate is inflated by first-player advantage and per-seat
-   robustness is invisible.
+| Opponent | Current best win rate | Required gate | Status |
+|---|---:|---:|---|
+| `R` | 97.4% | 90% | Pass |
+| `W` | 85.3% | 70% | Pass |
+| `VP` | 85.6% | 60% | Pass |
+| `F` | 1.0% | 52% | Fail |
+| `AB:2` | 0.5% | 52% | Fail |
 
-**Chosen goal:** robust, *human-like* 1v1 play — treat the simulator as a proxy for real
-Colonist, avoid overfitting to one heuristic, and require strength in *both* seats.
-**Compute:** hybrid — iterate locally at the `standard` (500k) preset, promote milestones to
-`strong` (5M) cloud bursts. The EC2/cloud scripts were removed in the refocus, so a
-lightweight cloud path must be restored.
+The near-term deliverable is therefore only partially complete: the model convincingly
+beats the random and reactive baselines, but the original goal of competitive play against
+`F` and search opponents remains open.
 
-Beating `F` and the built-in battery is the shared prerequisite for *any* use case; the
-human-like goal then drives the measurement, anti-overfitting, and robustness emphasis below.
+Completed engineering work:
 
-## Phase 0 — Trustworthy two-seat measurement (do first; cheap)
+- two-seat evaluation with fixed seat order and deterministic seed schedules;
+- behavioral cloning, MaskablePPO, mixed leagues, curricula, checkpointing, and strength reports;
+- hard-state sampling, candidate-action scoring, held-out decision regret, and F-leaf evaluation;
+- MCTS correctness fixes, transposition caching, latency budgets, and search profiling;
+- reproducible UCL CS and Myriad GPU setup, launch, monitoring, and evaluation scripts;
+- a dependency-gated experiment queue with explicit promotion and stop rules.
 
-Nothing else can be judged until measurement is unbiased. This is pure eval-side work.
+No GPU backlog experiment has completed yet. `00-gpu-smoke` is the next action.
 
-- **Add seat-swapped evaluation** in `catanatron/catanatron/colonist_1v1_eval.py`:
-  - Extend `evaluate_matchup` (`:204-275`) with a `both_seats: bool = True` option that splits
-    `num_games` between agent-as-seat-0 and agent-as-seat-1, reusing the existing per-game loop
-    and `_agent_color_from_players` (`:200`). Track the agent color per game rather than
-    assuming index 0.
-  - Add `win_rate_seat0`, `win_rate_seat1`, and per-seat VP margin to `MatchupResult`
-    (`:167-176`); keep the combined `win_rate` + `wilson_score_interval` (`:136`) as today.
-  - Thread the flag through `run_benchmark` (`:350-415`) and record it in `build_eval_meta`
-    (`:277-301`).
-- **Expose `--both-seats/--first-seat-only`** in `examples/colonist_1v1_evaluate.py` (default
-  both seats).
-- **Add a regression test** in `tests/test_colonist_1v1_training.py`: a deterministic agent
-  that always wins is counted correctly across both seats; combined win rate = mean of seats.
-- **Re-baseline the 500k model**: run the `full` protocol two-seat to get honest reference
-  numbers (R/W/VP/F/G:25/M:200/AB:2, per seat). This becomes the comparison point for all
-  later runs.
+## What the failed work established
 
-## Phase 1 — A bot that actually beats F (local, 500k)
+Four materially different approaches all remained at roughly 0-1% against `F`:
 
-- **Diverse-teacher data, not F-only.** `data/c1` is ~4,845 `F,F` games; imitating one
-  heuristic risks copying its quirks. Generate additional sets with
-  `examples/colonist_1v1_generate_data.py` for `VP,F` and a search teacher (`M:100` or `G:25`),
-  so BC learns varied strong play.
-- **BC warm-start** with `examples/colonist_1v1_bc.py --data-dir data/c1 data/c1_vp_f data/c1_search`
-  → `runs/v2/bc.pt` (keep default `--hidden 512 512`, action head 332, per `bc.meta.json`).
-- **BC checkpoint gate:** two-seat eval of `T:runs/v2/bc.pt` vs `F`. A faithful imitation
-  should be roughly competitive (≥ ~40%); if not, fix data/epochs *before* spending PPO time.
-- **PPO with diverse opponents** (`examples/colonist_1v1_train.py`):
-  `--preset standard --bc-checkpoint runs/v2/bc.pt --mixed-league --curriculum balanced`.
-  `balanced` (`colonist_training.py:280-292`) front-loads F/VP/W teachers via
-  `make_mixed_opponent_factory` (`:338-400`) — the opposite of the collapsed self-play run.
-  **Avoid the `self_play` curriculum at this stage.**
-- **Reward shaping A/B:** compare actual-VP shaping with `--visible-vp-reward`, which uses
-  public score only (`make_colonist_shaped_reward(use_visible_vp=True)`). A player legitimately
-  knows its own hidden VP cards, so this is a learning-signal ablation rather than a hidden-
-  information fix.
-- **Milestone target:** pass R/W/VP gates and **beat F (≥52%)** on two-seat eval. This unblocks
-  everything downstream.
+| Approach | Result against `F` | What it ruled out |
+|---|---:|---|
+| Self-play PPO, 500k steps | 0.5% | More unanchored model-free training is not enough |
+| BC on 5.4M samples | 0.5% | High imitation accuracy does not preserve decision quality |
+| PPO trained directly against `F` | about 1% | Opponent exposure alone does not solve the gap |
+| One-ply search with a learned value net | 0.5% | Search structure alone does not replace a useful value gradient |
 
-## Phase 2 — Robust strength via cloud bursts (5M)
+The strongest diagnosis is a **decision-margin value problem**. Terminal-outcome prediction
+is easy on late, obvious positions and can report high global accuracy while remaining too
+flat or noisy to rank close legal actions in the early and middle game. `F` succeeds because
+its hand-crafted value function supplies a useful preference at those decisions.
 
-- Once F is cleared locally, promote to a `strong` (5M) run with `--curriculum strong`
-  (`colonist_training.py:293-317`), which escalates opponents to `F` then `G:25` — the path
-  to beating the search bots (G:25, M:200, AB:2) in the `full` protocol.
-- **Restore a lightweight cloud path** (removed in the refocus): add a minimal
-  `scripts/cloud_train.sh` that provisions a GPU box, installs `pip install -e ".[gym,colonist]"`,
-  runs the `strong` preset into a `runs/<name>`, and syncs `runs/` back. Keep it burst-sized,
-  not a full platform — document it in `docs/TRAINING.md`.
-- Keep `--mixed-league` so the bounded `CheckpointLeague` (`:174-247`, last-8) is sampled
-  alongside teachers/baselines rather than dominating.
+This evidence changes the execution rule: do not scale another PPO run merely because it
+improves weak-opponent win rates. A candidate must first produce a real `F` signal or a
+materially better `F` victory-point margin.
 
-## Phase 3 — Robustness & anti-overfitting (the human-like core)
+## Current execution plan
 
-This is where the chosen goal diverges from "just pass the gates."
+The stages below match the IDs and dependencies in the GPU backlog. Commands, resource
+estimates, and storage guidance are intentionally not duplicated here.
 
-- **Held-out / out-of-distribution eval:** test against opponents *not* in the training mix —
-  e.g. deeper search (`M:500`, `AB:3`) — to detect overfitting to the trained opponents.
-- **Seat balance as a first-class gate:** require per-seat win rates vs F (from Phase 0) to
-  *both* clear threshold and sit within a few points of each other — a one-seat specialist is
-  not human-like.
-- **Exploitability probe:** run the bot vs progressively deeper AB/MCTS and inspect loss-mode
-  and VP-margin *distributions* (not just win rate) for repeatable losing lines.
-- **Self-play polish last:** only after the bot beats heuristics, a short `self_play`-curriculum
-  stage sharpens play (at high anchor strength it refines rather than collapses).
-- **Observation audit completed:** the vector exposes the acting player's own private cards and
-  only public opponent hand/development-card counts, not opponent card identities. No observation
-  redesign is currently justified.
+### Stage 0: validate the GPU workflow
 
-## Phase 4 — Reproducibility (supports hybrid iteration)
+Run `00-gpu-smoke` on the intended UCL host. It must complete 20k steps, produce checkpoints
+and a mid-run evaluation, feed the dashboard, and finish without a CUDA error. Until this
+passes, the training platform is code-complete but not hardware-validated.
 
-- Reuse existing tracking (`run_manifest.json`, `training_events.jsonl`, `models_index.jsonl`,
-  the TUI). Add `docs/RESULTS_LOG.md` recording each run's config + two-seat scorecard so local
-  and cloud runs stay comparable across commits (the docs already warn to compare same
-  protocol/commit/rules).
-- Pin seeds in `EVAL_PROTOCOLS` (`colonist_1v1_eval.py:54`) for repeatable scorecards.
+### Stage 1: establish the reward baseline
 
-## Critical files
+Run the matched seed-101 pair:
 
-| File | Change |
+- `10-balanced-actual-s101`: current actual-VP shaping control;
+- `11-balanced-visible-s101`: public-score-only shaping treatment.
+
+Compare two-seat scorecards from the same commit and protocol. Visible-VP shaping wins only
+if it improves weighted score by at least 0.03 without losing the `R`, `W`, or `VP` gates.
+Treat a smaller difference as inconclusive.
+
+Run only the seed-202 replication for the treatment that wins seed 101:
+
+- `12-balanced-actual-s202`, or
+- `13-balanced-visible-s202`.
+
+The direction of the improvement must repeat. Do not run both replications automatically.
+
+### Stage 2: test choice-focused behavioral cloning
+
+Generate scored hard-state data, train a BC checkpoint with `--hard-states`, and inspect
+held-out legal-choice accuracy and mean regret. Raw action accuracy is not the gate.
+
+Run `20-hard-bc-actual-s101` only when the checkpoint lowers held-out decision regret. Run
+`21-hard-bc-visible-s101` only if visible-VP reward won Stage 1. Keep the branch only if it
+improves `F` win rate or `F` VP margin over the matched reward baseline while retaining the
+weak gates.
+
+### Stage 3: promote only a credible signal
+
+Run `30-strong-promoted` for 5M steps only after a 500k candidate reaches at least 10% against
+`F` and still passes `R >= 90%`, `W >= 70%`, and `VP >= 60%`. The 10% threshold is a
+promotion signal, not the final strength target.
+
+Evaluate a promoted candidate with the milestone and full protocols, including held-out search
+opponents. Require the post-2026-07-01 per-seat results to remain credible; historical seat
+splits from before the seat-order correction are not comparable.
+
+### Stage 4: optional anchored self-play
+
+Run `40-selfplay-polish` only after Stage 3 produces a strong anchored parent. Keep it only if
+`F` or search strength improves and each weak-tier result stays within two percentage points of
+the parent. Self-play is a finishing step, not a route around the promotion gate.
+
+## Decision gates
+
+| Decision | Evidence required |
 |---|---|
-| `catanatron/catanatron/colonist_1v1_eval.py` | Seat-swapped `evaluate_matchup`, per-seat fields on `MatchupResult`, thread through `run_benchmark`/`build_eval_meta`; pin protocol seeds |
-| `examples/colonist_1v1_evaluate.py` | `--both-seats` flag (default on) |
-| `examples/colonist_1v1_train.py` | Use `--bc-checkpoint`, `--mixed-league`, `--curriculum balanced`→`strong`, `--visible-vp-reward` (mostly existing flags) |
-| `examples/colonist_1v1_generate_data.py` | Generate `VP,F` and search-teacher datasets |
-| `tests/test_colonist_1v1_training.py` | Seat-swap eval regression test |
-| `scripts/cloud_train.sh` (new) | Minimal cloud-burst training path |
-| `docs/RESULTS_LOG.md` (new), `docs/TRAINING.md` | Results log + cloud-burst docs |
+| GPU workflow is usable | Smoke run completes with CUDA, checkpoints, evaluation, and dashboard output |
+| Reward treatment wins | At least +0.03 weighted score, no weak-gate regression, then same direction on seed 202 |
+| Hard-state BC is worth PPO time | Lower held-out regret before training; better `F` rate or VP margin after training |
+| Candidate deserves 5M steps | At least 10% against `F` and all weak gates retained |
+| Candidate meets the original strength bar | At least 52% against `F` and the required search opponents under two-seat evaluation |
+| Self-play polish is accepted | Search strength rises; weak results stay within two points of the parent |
 
-Reused as-is: `make_mixed_opponent_factory`, `CURRICULUM_PRESETS`, `CheckpointLeague`,
-`warmstart_bc_into_maskable_ppo`, `TRAINING_PRESETS` (`colonist_training.py`);
-`make_colonist_shaped_reward` (`colonist_rewards.py`); `wilson_score_interval`,
-`EVAL_PROTOCOLS`, `DEFAULT_BENCHMARK_GATES`, `summarize_report` (`colonist_1v1_eval.py`);
-bot codes `T:` (BC) and `L:` (PPO).
+Stop a run on NaNs, repeated CUDA errors, a full disk, or no progress events for 15 minutes.
+Do not infer a winner from one seed when the weighted-score difference is below 0.03. Preserve
+the winning checkpoint, manifest, evaluation report, and registry before pruning artifacts.
 
-## Verification
+## If the gated backlog fails
 
-- `make test-1v1` plus the new seat-swap test pass.
-- Two-seat `full` eval of the 500k baseline produces honest per-seat reference numbers.
-- BC checkpoint gate: `T:runs/v2/bc.pt` vs F is competitive before PPO.
-- Phase 1 local PPO run clears R/W/VP gates and beats F (≥52%) two-seat.
-- Phase 2 cloud `strong` run improves the search-bot win rates vs the 500k baseline, with
-  seat balance maintained.
+If the 500k candidates remain in the existing 0-4% `F` band, stop the current PPO track. The
+next credible research direction is AlphaZero-style policy/value learning with iterated
+self-play and MCTS-generated policy and value targets. That system is not implemented in the
+current backlog, requires a separate design and compute budget, and has uncertain payoff.
 
-## Notes / non-goals
+Do not quietly turn that stretch track into another long PPO run. The failed experiments already
+show that scale without decision-margin signal is not a justified use of GPU time.
 
-- Still no connection to or automation of Colonist; this stays a local simulator + trainer.
-- "Human-like" is pursued via robustness proxies (diverse opponents, both-seat strength,
-  held-out eval, visible-VP shaping), since no human-game data is in scope.
+## Scope and non-goals
+
+- The project remains a local simulator and trainer. It does not connect to or automate Colonist.
+- "Human-like" is measured through reactive play, diverse opponents, seat balance, public-state
+  ablations, and held-out evaluation; no human-game dataset is currently in scope.
+- Search opponents are evaluation anchors. The preferred deployed policy remains reactive unless
+  the project explicitly adopts the AlphaZero research track.
+- Generated data, checkpoints, and reports remain under ignored `data/` and `runs/` directories;
+  comparable outcomes must be recorded in [RESULTS_LOG.md](RESULTS_LOG.md).
+
+## Working documents
+
+| Document | Responsibility |
+|---|---|
+| [RESULTS_LOG.md](RESULTS_LOG.md) | Recorded evidence and comparable scorecards |
+| [GPU_EXPERIMENT_BACKLOG.md](GPU_EXPERIMENT_BACKLOG.md) | Run order, commands, resources, dependencies, and stop rules |
+| [TRAINING.md](TRAINING.md) | General training and evaluation reference |
+| [UCL_CS_GPUS.md](UCL_CS_GPUS.md) | Interactive UCL CS GPU-host workflow |
+| [UCL_MYRIAD.md](UCL_MYRIAD.md) | Scheduled Myriad workflow |
