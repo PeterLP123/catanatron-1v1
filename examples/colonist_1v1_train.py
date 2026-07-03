@@ -13,7 +13,7 @@ Smoke run::
 Full run (after BC data + optional --bc-checkpoint)::
 
     python examples/colonist_1v1_train.py --timesteps 1000000 --n-envs 4 \\
-        --bc-checkpoint colonist_bc_policy.pt --league-size 8 --eval-freq 50000
+        --bc-checkpoint runs/colonist_bc_policy.pt --league-size 8 --eval-freq 50000
 """
 
 from __future__ import annotations

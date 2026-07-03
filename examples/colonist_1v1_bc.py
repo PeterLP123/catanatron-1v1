@@ -33,8 +33,10 @@ from catanatron.gym.colonist_training import (
     load_teacher_parquet,
 )
 
+DEFAULT_BC_CHECKPOINT_PATH = Path("runs/colonist_bc_policy.pt")
 
-def main(argv: list[str] | None = None) -> None:
+
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
         "--data-dir",
@@ -73,10 +75,14 @@ def main(argv: list[str] | None = None) -> None:
         default=332,
         help="Policy action head size; keep full action space even if rare actions are absent.",
     )
-    p.add_argument("--out", type=Path, default=Path("colonist_bc_policy.pt"))
+    p.add_argument("--out", type=Path, default=DEFAULT_BC_CHECKPOINT_PATH)
     p.add_argument("--tensorboard", type=Path, default=None)
     p.add_argument("--run-dir", type=Path, default=None)
-    args = p.parse_args(argv)
+    return p
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
 
     import torch
     from torch import nn

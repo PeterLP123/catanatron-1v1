@@ -27,6 +27,7 @@ from catanatron.gym.colonist_training import (
 )
 from catanatron.gym.tui_data import summarize_run
 from examples import colonist_1v1_generate_data
+from examples.colonist_1v1_bc import DEFAULT_BC_CHECKPOINT_PATH, build_parser
 from examples.colonist_1v1_train import make_colonist_env
 
 
@@ -40,6 +41,12 @@ def _game_config(seed=0):
         colonist_1v1=True,
         seed=seed,
     )
+
+
+def test_bc_default_checkpoint_stays_out_of_repo_root():
+    args = build_parser().parse_args(["--data-dir", "data/c1"])
+    assert args.out == DEFAULT_BC_CHECKPOINT_PATH
+    assert args.out == Path("runs/colonist_bc_policy.pt")
 
 
 def _play_summary(seed):
