@@ -11,7 +11,7 @@ from typing import Optional, Sequence
 
 from catanatron.game import Game
 from catanatron.models.map import MapType, NumberPlacement, build_map
-from catanatron.models.player import Color, Player
+from catanatron.models.player import Player
 from catanatron.state import DiceMode
 
 

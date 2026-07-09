@@ -9,7 +9,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from catanatron import Color
 from catanatron.cli.cli_players import parse_cli_string
 from catanatron.cli.play import GameConfigOptions, OutputOptions, play_batch
 from catanatron.colonist_1v1_eval import (

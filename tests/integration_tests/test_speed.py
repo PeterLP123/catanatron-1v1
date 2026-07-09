@@ -71,7 +71,7 @@ def test_simpleplayer_speed(benchmark):
             game.play_tick()
         return game
 
-    result = benchmark(_play_game, game)
+    benchmark(_play_game, game)
 
 
 def test_weightedrandom_speed(benchmark):
@@ -88,7 +88,7 @@ def test_weightedrandom_speed(benchmark):
             game.play_tick()
         return game
 
-    result = benchmark(_play_game, game)
+    benchmark(_play_game, game)
 
 
 def test_alphabeta_speed(benchmark):
@@ -105,7 +105,7 @@ def test_alphabeta_speed(benchmark):
             game.play_tick()
         return game
 
-    result = benchmark(_play_game, game)
+    benchmark(_play_game, game)
 
 
 def test_same_turn_alphabeta_speed(benchmark):
@@ -122,4 +122,4 @@ def test_same_turn_alphabeta_speed(benchmark):
             game.play_tick()
         return game
 
-    result = benchmark(_play_game, game)
+    benchmark(_play_game, game)

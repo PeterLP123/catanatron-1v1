@@ -54,7 +54,6 @@ class GreedyPlayoutsPlayer(Player):
 
 
 def run_playouts(action_applied_game_copy, num_playouts):
-    start = time.time()
     params = []
     for _ in range(num_playouts):
         params.append(action_applied_game_copy)
@@ -63,8 +62,6 @@ def run_playouts(action_applied_game_copy, num_playouts):
             counter = Counter(p.map(run_playout, params))
     else:
         counter = Counter(map(run_playout, params))
-    duration = time.time() - start
-    # print(f"{num_playouts} playouts took: {duration}. Results: {counter}")
     return counter
 
 

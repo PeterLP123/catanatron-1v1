@@ -189,7 +189,7 @@ def test_tile_features():
     value = resource if resource is not None else "DESERT"
     proba = number_probability(tile.number) if resource is not None else 0
     assert features[f"TILE0_IS_{value}"]
-    assert features[f"TILE0_PROBA"] == proba
+    assert features["TILE0_PROBA"] == proba
 
 
 def test_tile_features_in_mini():
@@ -234,10 +234,10 @@ def test_graph_features():
     game.execute(Action(p0_color, ActionType.BUILD_ROAD, (2, 3)))
 
     features = graph_features(game, p0_color)
-    assert features[f"NODE3_P0_SETTLEMENT"]
-    assert features[f"EDGE(2, 3)_P0_ROAD"]
-    assert not features[f"NODE3_P1_SETTLEMENT"]
-    assert not features[f"NODE0_P1_SETTLEMENT"]
+    assert features["NODE3_P0_SETTLEMENT"]
+    assert features["EDGE(2, 3)_P0_ROAD"]
+    assert not features["NODE3_P1_SETTLEMENT"]
+    assert not features["NODE0_P1_SETTLEMENT"]
     assert len(features) == 54 * len(players) * 2 + NUM_EDGES * len(players)
     assert sum(features.values()) == 2
 
@@ -262,10 +262,10 @@ def test_graph_features_in_mini():
     game.execute(Action(p0_color, ActionType.BUILD_ROAD, (2, 3)))
 
     features = graph_features(game, p0_color)
-    assert features[f"NODE3_P0_SETTLEMENT"]
-    assert features[f"EDGE(2, 3)_P0_ROAD"]
-    assert not features[f"NODE3_P1_SETTLEMENT"]
-    assert not features[f"NODE0_P1_SETTLEMENT"]
+    assert features["NODE3_P0_SETTLEMENT"]
+    assert features["EDGE(2, 3)_P0_ROAD"]
+    assert not features["NODE3_P1_SETTLEMENT"]
+    assert not features["NODE0_P1_SETTLEMENT"]
     # todo: CHANGE NUM_EDGES
     assert len(features) == 24 * len(players) * 2 + 30 * len(players)
     assert sum(features.values()) == 2

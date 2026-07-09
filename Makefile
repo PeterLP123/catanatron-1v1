@@ -1,10 +1,13 @@
-.PHONY: install test test-1v1 test-gpu-ready smoke train evaluate tui
+.PHONY: install lint test test-1v1 test-gpu-ready smoke train evaluate tui
 
 PYTHON ?= python3
 RUN_DIR ?= runs/colonist_1v1
 
 install:
 	$(PYTHON) -m pip install -e ".[dev,gym,colonist,tui]"
+
+lint:
+	$(PYTHON) -m ruff check catanatron/catanatron examples tests
 
 test:
 	$(PYTHON) -m pytest

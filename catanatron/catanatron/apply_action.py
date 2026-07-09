@@ -46,7 +46,6 @@ from catanatron.state_functions import (
     player_deck_draw,
     player_deck_replenish,
     player_freqdeck_subtract,
-    player_deck_to_array,
     player_key,
     player_num_resource_cards,
     player_resource_freqdeck_contains,

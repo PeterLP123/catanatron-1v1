@@ -11,13 +11,11 @@ from catanatron.models.decks import (
     draw_from_listdeck,
     freqdeck_add,
     freqdeck_from_listdeck,
-    freqdeck_replenish,
     freqdeck_can_draw,
     freqdeck_count,
     freqdeck_draw,
     freqdeck_replenish,
     freqdeck_subtract,
-    starting_devcard_bank,
     starting_devcard_proba,
     starting_resource_bank,
 )

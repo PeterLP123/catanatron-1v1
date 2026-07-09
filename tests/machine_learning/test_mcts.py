@@ -1,8 +1,6 @@
 import random
 
-from typing import List
 from catanatron import Game, RandomPlayer, Color
-from catanatron.models.player import Player
 from catanatron.players.weighted_random import WeightedRandomPlayer
 from catanatron.players.mcts import MCTSPlayer, StateNode
 

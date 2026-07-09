@@ -10,7 +10,6 @@ import pytest
 from catanatron import Color
 from catanatron.colonist_1v1_eval import (
     DEFAULT_BENCHMARK_GATES,
-    EvalProtocol,
     EvaluationReport,
     MatchupResult,
     append_model_registry,

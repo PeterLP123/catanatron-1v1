@@ -8,9 +8,9 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from catanatron.gym.colonist_training import EVENTS_NAME, MODEL_REGISTRY_NAME
+from catanatron.gym.colonist_training import EVENTS_NAME
 from catanatron.gym.experiment_backlog import EXPERIMENTS, backlog_statuses
 from catanatron.gym.tui_data import (
     OPPONENT_COLUMNS,
@@ -134,7 +134,7 @@ def build_dashboard(run_dir: Path):
 def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
     try:
         from textual.app import App, ComposeResult
-        from textual.containers import Container, Horizontal, Vertical
+        from textual.containers import Horizontal, Vertical
         from textual.widgets import (
             Button,
             DataTable,
