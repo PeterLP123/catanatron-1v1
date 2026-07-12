@@ -36,6 +36,8 @@ DEFAULT_WEIGHTS = {
     "army_size": 10.1,
 }
 
+_EFFECTIVE_PRODUCTION_FEATURES = build_production_features(True)
+
 # Change these to play around with new values
 CONTENDER_WEIGHTS = {
     "public_vps": 300000000000001.94,
@@ -56,11 +58,9 @@ CONTENDER_WEIGHTS = {
 
 def base_fn(params=DEFAULT_WEIGHTS):
     def fn(game, p0_color):
-        production_features = build_production_features(True)
-        our_production_sample = production_features(game, p0_color)
-        enemy_production_sample = production_features(game, p0_color)
-        production = value_production(our_production_sample, "P0")
-        enemy_production = value_production(enemy_production_sample, "P1", False)
+        production_sample = _EFFECTIVE_PRODUCTION_FEATURES(game, p0_color)
+        production = value_production(production_sample, "P0")
+        enemy_production = value_production(production_sample, "P1", False)
 
         key = player_key(game.state, p0_color)
         longest_road_length = get_longest_road_length(game.state, p0_color)
@@ -167,11 +167,11 @@ class ValueFunctionPlayer(Player):
 
         best_value = float("-inf")
         best_action = None
+        value_fn = get_value_fn(self.value_fn_builder_name, self.params)
         for action in playable_actions:
             game_copy = game.copy()
             game_copy.execute(action)
 
-            value_fn = get_value_fn(self.value_fn_builder_name, self.params)
             value = value_fn(game_copy, self.color)
             if value > best_value:
                 best_value = value

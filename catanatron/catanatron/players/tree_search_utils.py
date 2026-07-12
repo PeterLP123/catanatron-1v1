@@ -43,6 +43,72 @@ def execute_deterministic(game, action):
     return [(copy, 1)]
 
 
+def _prepare_balanced_controller(controller, color):
+    """Mirror the observable pre-draw state transition without sampling a card."""
+    controller._init_total_sevens(color)
+    if controller.cards_left_in_deck < controller.MINIMUM_CARDS_BEFORE_RESHUFFLING:
+        controller.reshuffle_weighted_dice_deck()
+    controller.update_weighted_dice_deck_probabilities()
+    controller._adjust_weighted_dice_deck_based_on_recent_rolls()
+    controller._adjust_seven_probability_based_on_sevens(color)
+    return controller
+
+
+def _consume_balanced_roll(controller, color, total, outcome):
+    """Apply the controller mutation that follows a known conditional draw."""
+    deck = controller.weighted_dice_deck[total - controller.INDEX_OFFSET]
+    deck.dice_pairs.remove(outcome)
+    controller.recent_rolls.append(total)
+    deck.recently_rolled_count += 1
+    controller.cards_left_in_deck -= 1
+    if len(controller.recent_rolls) > controller.MAXIMUM_RECENT_ROLL_MEMORY:
+        controller._update_recently_rolled()
+    if total == 7:
+        controller._update_seven_rolls(color)
+
+
+def _execute_balanced_roll_spectrum(game: Game, action: Action):
+    """Enumerate the balanced controller's current conditional total weights."""
+    prepared = _prepare_balanced_controller(
+        game.state.dice_controller.copy(), action.color
+    )
+    total_weight = prepared._get_total_probability_weight()
+    if total_weight <= 0:
+        outcome = (3, 4)  # Matches DiceControllerBalanced's defensive fallback.
+        option_game = game.copy()
+        option_game.execute(
+            action,
+            validate_action=False,
+            action_record=ActionRecord(action=action, result=outcome),
+        )
+        return [(option_game, 1.0)]
+
+    results = []
+    for deck in prepared.weighted_dice_deck:
+        if deck.probability_weighting <= 0 or not deck.dice_pairs:
+            continue
+        # Pair orientation has no game effect; retaining one representative pair
+        # gives the exact total distribution and exact future deck counts.
+        outcome = deck.dice_pairs[0]
+        option_game = game.copy()
+        child_controller = _prepare_balanced_controller(
+            option_game.state.dice_controller, action.color
+        )
+        _consume_balanced_roll(
+            child_controller,
+            action.color,
+            deck.total_dice,
+            outcome,
+        )
+        option_game.execute(
+            action,
+            validate_action=False,
+            action_record=ActionRecord(action=action, result=outcome),
+        )
+        results.append((option_game, deck.probability_weighting / total_weight))
+    return results
+
+
 def execute_spectrum(game: Game, action: Action):
     """Returns [(game_copy, proba), ...] tuples for result of given action.
     Result probas should add up to 1. Does not modify self"""
@@ -60,10 +126,14 @@ def execute_spectrum(game: Game, action: Action):
                 current_deck += [card] * number
 
         for card in sorted(set(current_deck)):
-            option_action = Action(action.color, action.action_type, card)
+            option_action = Action(action.color, action.action_type, action.value)
             option_game = game.copy()
             try:
-                option_game.execute(option_action, validate_action=False)
+                option_game.execute(
+                    option_action,
+                    validate_action=False,
+                    action_record=ActionRecord(action=option_action, result=card),
+                )
             except Exception:
                 # ignore exceptions, since player might imagine impossible outcomes.
                 # ignoring means the value function of this node will be flattened,
@@ -72,6 +142,11 @@ def execute_spectrum(game: Game, action: Action):
             results.append((option_game, current_deck.count(card) / len(current_deck)))
         return results
     elif action.action_type == ActionType.ROLL:
+        if (
+            getattr(game.state, "dice_mode", "uniform") == "balanced"
+            and game.state.dice_controller is not None
+        ):
+            return _execute_balanced_roll_spectrum(game, action)
         results = []
         for roll in range(2, 13):
             outcome = (roll // 2, math.ceil(roll / 2))
@@ -93,7 +168,9 @@ def execute_spectrum(game: Game, action: Action):
             # Nothing to steal
             return execute_deterministic(game, action)
 
-        for card in RESOURCES:
+        for card, count in zip(RESOURCES, opponent_hand):
+            if count <= 0:
+                continue
             option_action = Action(
                 action.color,
                 action.action_type,
@@ -112,7 +189,7 @@ def execute_spectrum(game: Game, action: Action):
                 # ignoring means the value function of this node will be flattened,
                 # to the one before.
                 pass
-            results.append((option_game, 1 / 5.0))
+            results.append((option_game, count / opponent_hand_size))
         return results
     else:
         raise RuntimeError("Unknown ActionType " + str(action.action_type))

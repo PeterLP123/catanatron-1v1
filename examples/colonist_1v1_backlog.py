@@ -11,10 +11,15 @@ from pathlib import Path
 from catanatron.gym.experiment_backlog import (
     EXPERIMENTS,
     backlog_statuses,
+    check_backlog_markdown,
+    evaluate_experiment,
     experiments_by_id,
+    launch_argv,
     launch_command,
     launch_environment,
     load_final_metrics,
+    render_backlog_markdown,
+    write_launch_evidence,
 )
 
 
@@ -87,6 +92,16 @@ def _print_show(experiment, supplied: dict[str, str]) -> None:
         print(f"Command: blocked — {exc}")
 
 
+def _print_decision(experiment, runs_root: Path) -> None:
+    status = backlog_statuses(runs_root)[experiment.id]
+    print(f"Status: {status}")
+    if status in {"accepted", "rejected", "inconclusive"}:
+        decision = evaluate_experiment(experiment, runs_root)
+        print(f"Evidence: {decision.reason}")
+        if decision.evidence:
+            print(f"Details: {dict(decision.evidence)}")
+
+
 def _print_comparison(ids: list[str], runs_root: Path) -> int:
     headings = ("ID", "Score", "R", "W", "VP", "F", "Max seat gap", "Gates")
     print("  ".join(f"{heading:>12}" for heading in headings))
@@ -136,11 +151,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     for child in (show, start):
         child.add_argument("--bc-checkpoint")
+        child.add_argument("--bc-baseline-checkpoint")
         child.add_argument("--resume-checkpoint")
     compare = sub.add_parser(
         "compare", help="Compare final benchmark reports for experiment IDs."
     )
     compare.add_argument("experiment_ids", nargs="+")
+    render = sub.add_parser(
+        "render", help="Render the authoritative Markdown queue table."
+    )
+    render.add_argument("--output", type=Path)
+    check = sub.add_parser(
+        "check", help="Fail when a generated Markdown queue table has drifted."
+    )
+    check.add_argument("path", type=Path)
     args = parser.parse_args(argv)
 
     if args.command == "list":
@@ -156,21 +180,44 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "compare":
         return _print_comparison(args.experiment_ids, args.runs_root)
+    if args.command == "render":
+        rendered = render_backlog_markdown()
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(rendered, encoding="utf-8")
+            print(f"Wrote {args.output}")
+        else:
+            print(rendered, end="")
+        return 0
+    if args.command == "check":
+        if check_backlog_markdown(args.path):
+            print(f"Backlog table is current: {args.path}")
+            return 0
+        print(
+            f"Backlog table has drifted: {args.path}\n"
+            "Regenerate it with: python examples/colonist_1v1_backlog.py render "
+            f"--output {args.path}",
+            file=sys.stderr,
+        )
+        return 1
 
     experiment = _experiment(args.experiment_id)
     supplied = {
         "BC_CHECKPOINT": args.bc_checkpoint,
+        "BC_BASELINE_CHECKPOINT": args.bc_baseline_checkpoint,
         "RESUME_CHECKPOINT": args.resume_checkpoint,
     }
     if args.command == "show":
         _print_show(experiment, supplied)
+        _print_decision(experiment, args.runs_root)
         return 0
 
     statuses = backlog_statuses(args.runs_root)
-    if statuses[experiment.id] == "blocked" and not args.force:
+    if statuses[experiment.id] in {"blocked", "skipped"} and not args.force:
         dependencies = ", ".join(experiment.depends_on)
         raise SystemExit(
-            f"{experiment.id} is blocked by incomplete dependencies: {dependencies}. "
+            f"{experiment.id} is {statuses[experiment.id]} by its evidence gate "
+            f"(dependencies: {dependencies or 'promotion evidence'}). "
             "Use --force only when those results exist elsewhere."
         )
     try:
@@ -179,9 +226,12 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(str(exc)) from exc
     env = dict(os.environ)
     env.update(launch)
-    script = ROOT / "scripts" / "ucl_cs" / "start_run.sh"
+    write_launch_evidence(experiment, args.runs_root, launch)
     os.chdir(ROOT)
-    os.execvpe("bash", ["bash", os.fspath(script)], env)
+    command = list(launch_argv(experiment))
+    if command[0] == "python":
+        command[0] = sys.executable
+    os.execvpe(command[0], command, env)
     return 0
 
 
