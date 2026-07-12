@@ -174,12 +174,22 @@ def test_checkpoint_league_register_and_prune(tmp_path):
     f3 = tmp_path / "c.zip"
     for f in (f1, f2, f3):
         f.write_bytes(b"zip")
+    f1.with_suffix(".schema.json").write_text('{"schema_version": 1}')
     league.register(f1, label="a")
+    assert (league.league_dir / "a.schema.json").exists()
     league.register(f2, label="b")
     league.register(f3, label="c")
     paths = league.paths()
     assert len(paths) == 2
-    assert not (league.league_dir / "a.zip").exists() or "a.zip" not in paths
+    assert not (league.league_dir / "a.zip").exists()
+    archived = list((tmp_path / "archive" / "league_evictions").iterdir())
+    assert any(
+        path.name.startswith("a-") and path.suffix == ".zip" for path in archived
+    )
+    assert any(
+        path.name.startswith("a-") and path.name.endswith(".schema.json")
+        for path in archived
+    )
 
 
 def test_resolve_teacher_parquet_paths_uses_newest_when_meta_present(tmp_path):
@@ -316,6 +326,32 @@ def test_mixed_opponent_factory_uses_live_league_fallback():
     player = factory()
     assert player.color == Color.RED
     league.sample_path.assert_called()
+
+
+def test_mixed_opponent_factory_caches_unchanged_league_checkpoint(tmp_path):
+    checkpoint = tmp_path / "league.zip"
+    checkpoint.write_bytes(b"model")
+    league = MagicMock()
+    league.sample_path.return_value = str(checkpoint)
+    loaded_player = MagicMock()
+    with patch(
+        "catanatron.players.learned.load_sb3_player", return_value=loaded_player
+    ) as load:
+        factory = make_mixed_opponent_factory(
+            league=league,
+            league_weight=1.0,
+            teacher_weight=0.0,
+            baseline_weight=0.0,
+            rng=np.random.default_rng(0),
+        )
+        assert factory() is loaded_player
+        assert factory() is loaded_player
+    load.assert_called_once_with(
+        str(checkpoint),
+        Color.RED,
+        map_type="BASE",
+        player_colors=(Color.BLUE, Color.RED),
+    )
 
 
 def test_training_run_tracker_writes_manifest_and_events(tmp_path):

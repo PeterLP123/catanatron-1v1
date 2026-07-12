@@ -1,187 +1,395 @@
 #!/usr/bin/env python3
-"""
-Behavioral cloning on Colonist 1v1 parquet logs (``ParquetDataAccumulator`` output).
+"""Behavioral cloning on Colonist 1v1 Parquet decision logs.
 
-**Dependencies** (install through this repository's extras)::
-
-    pip install -e '.[gym,colonist]'
+The trainer streams one game shard at a time, splits whole games, and supports
+three objectives: full-space legacy cross entropy, legal-masked cross entropy,
+and candidate-value listwise learning.
 
 Example::
 
-    python examples/colonist_1v1_bc.py --data-dir data/c1_teachers --epochs 10 \\
-        --out runs/colonist_bc_policy.pt
+    python examples/colonist_1v1_bc.py --data-dir data/c1_teachers \
+        --loss listwise --epochs 10 --out runs/colonist_bc_policy.pt
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
+import json
+import math
+import sys
 from pathlib import Path
+from typing import Any
 
-import numpy as np
-
+from catanatron.gym.bc_training import (
+    CANDIDATE_VALUES_COLUMN,
+    LEGAL_ACTIONS_COLUMN,
+    DecisionMetricAccumulator,
+    ParquetDecisionBatches,
+    candidate_listwise_loss,
+    hash_parquet_shards,
+    inspect_parquet_dataset,
+    legal_masked_cross_entropy,
+    resolve_torch_device,
+    seed_everything,
+)
 from catanatron.gym.colonist_training import (
     BcCheckpointMeta,
-    CANDIDATE_VALUES_COLUMN,
-    GAME_ID_COLUMN,
-    LEGAL_ACTIONS_COLUMN,
-    NUM_LEGAL_COLUMN,
     TrainingRunTracker,
     build_mlp_layers,
-    decision_metrics,
-    grouped_split_masks,
     hard_state_sample_weights,
-    load_teacher_parquet,
+    resolve_teacher_parquet_paths,
+)
+from catanatron.gym.model_schema import (
+    build_model_schema,
+    checkpoint_schema_path,
+    read_model_schema,
+    validate_model_schema,
+    write_model_schema,
 )
 
 DEFAULT_BC_CHECKPOINT_PATH = Path("runs/colonist_bc_policy.pt")
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument(
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
         "--data-dir",
         type=Path,
         nargs="+",
         required=True,
         help="One or more directories of game *.parquet files.",
     )
-    p.add_argument("--epochs", type=int, default=5)
-    p.add_argument("--batch-size", type=int, default=4096)
-    p.add_argument("--lr", type=float, default=1e-3)
-    p.add_argument("--val-fraction", type=float, default=0.1)
-    p.add_argument(
+    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--batch-size", type=int, default=4096)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--val-fraction", type=float, default=0.1)
+    parser.add_argument(
         "--test-fraction",
         type=float,
         default=0.0,
         help="Held-out test split (by game). Reported once at the end.",
     )
-    p.add_argument(
+    parser.add_argument(
         "--split-seed",
         type=int,
         default=0,
         help="Seed for the grouped (by-game) train/val/test split.",
     )
-    p.add_argument(
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Python/NumPy/Torch seed (defaults to --split-seed).",
+    )
+    parser.add_argument(
         "--hard-states",
         action="store_true",
-        help="Resample the TRAIN split toward genuine decisions (drop forced "
-        "rows, downweight ROLL/END_TURN, oversample strategy families). "
-        "Validation/test stay unfiltered for honest metrics.",
+        help="Weight TRAIN rows toward genuine strategic decisions. Validation/test remain honest.",
     )
-    p.add_argument("--hidden", type=int, nargs=2, default=(512, 512))
-    p.add_argument(
+    parser.add_argument("--hidden", type=int, nargs=2, default=(512, 512))
+    parser.add_argument(
         "--n-actions",
         type=int,
         default=332,
-        help="Policy action head size; keep full action space even if rare actions are absent.",
+        help="Policy action head size. Must match the recorded action schema.",
     )
-    p.add_argument("--out", type=Path, default=DEFAULT_BC_CHECKPOINT_PATH)
-    p.add_argument("--tensorboard", type=Path, default=None)
-    p.add_argument("--run-dir", type=Path, default=None)
-    return p
+    parser.add_argument(
+        "--loss",
+        choices=("auto", "cross_entropy", "legal_ce", "listwise"),
+        default="auto",
+        help="auto selects legal_ce for dataset-v2 logs and cross_entropy for legacy logs.",
+    )
+    parser.add_argument(
+        "--listwise-temperature",
+        type=float,
+        default=0.25,
+        help="Soft-target temperature for --loss listwise.",
+    )
+    parser.add_argument(
+        "--tie-tolerance",
+        type=float,
+        default=1e-6,
+        help="Candidate values closer than this are treated as exact ties.",
+    )
+    parser.add_argument(
+        "--device",
+        choices=("auto", "cpu", "cuda", "mps"),
+        default="auto",
+    )
+    parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument(
+        "--feature-profile",
+        choices=("raw", "public_derived"),
+        default="raw",
+        help="Schema identity of the F_* observation columns.",
+    )
+    parser.add_argument(
+        "--allow-legacy-dataset-schema",
+        action="store_true",
+        help="Allow datasets without action/rules schema hashes after manual verification.",
+    )
+    parser.add_argument("--out", type=Path, default=DEFAULT_BC_CHECKPOINT_PATH)
+    parser.add_argument("--tensorboard", type=Path, default=None)
+    parser.add_argument("--run-dir", type=Path, default=None)
+    return parser
+
+
+def _resolve_dataset_paths(
+    data_dirs: list[Path],
+    *,
+    expected_schema: dict[str, Any],
+    allow_legacy_schema: bool = False,
+) -> list[Path]:
+    paths: list[Path] = []
+    for directory in data_dirs:
+        meta_path = directory / "dataset_meta.json"
+        meta: dict[str, Any] = {}
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            if meta.get("status") not in {None, "complete"}:
+                raise ValueError(
+                    f"Dataset {directory} is {meta.get('status')!r}; "
+                    "resume generation before training"
+                )
+        schema = read_model_schema(directory / "dataset_schema.json")
+        if schema is None:
+            if not allow_legacy_schema:
+                raise ValueError(
+                    f"Dataset {directory} has no dataset_schema.json. "
+                    "Regenerate it or use --allow-legacy-dataset-schema only "
+                    "after manually confirming feature/action/rules compatibility."
+                )
+        else:
+            validate_model_schema(
+                expected_schema, schema, context=f"dataset {directory}"
+            )
+            for key in (
+                "model_schema_hash",
+                "feature_hash",
+                "action_hash",
+                "rules_hash",
+            ):
+                expected_key = "schema_hash" if key == "model_schema_hash" else key
+                if meta.get(key) is not None and meta[key] != schema[expected_key]:
+                    raise ValueError(
+                        f"Dataset {directory} metadata {key} disagrees with its schema"
+                    )
+        directory_paths = resolve_teacher_parquet_paths(directory)
+        if meta.get("dataset_sha256"):
+            _, actual_dataset_hash = hash_parquet_shards(
+                directory_paths, progress=False
+            )
+            if actual_dataset_hash != meta["dataset_sha256"]:
+                raise ValueError(
+                    f"Dataset {directory} shard hash does not match dataset_meta.json"
+                )
+        paths.extend(directory_paths)
+    if not paths:
+        raise FileNotFoundError(f"No .parquet files under {data_dirs}")
+    return paths
+
+
+def _weighted_mean(losses, weights):
+    denominator = weights.sum()
+    if float(denominator.detach().cpu()) <= 0:
+        raise ValueError("Training batch has no positive sample weight")
+    return (losses * weights).sum() / denominator
+
+
+def _batch_loss(net, batch, loss_name: str, device, args):
+    from torch.nn import functional as F
+
+    features = batch["features"].to(device, non_blocking=True)
+    targets = batch["targets"].to(device, non_blocking=True)
+    logits = net(features)
+    weights = batch["sample_weights"].to(device, non_blocking=True)
+    if loss_name == "cross_entropy":
+        row_losses = F.cross_entropy(logits, targets, reduction="none")
+        return _weighted_mean(row_losses, weights), logits, len(targets)
+
+    legal_indices = batch["legal_indices"].to(device, non_blocking=True)
+    legal_mask = batch["legal_mask"].to(device, non_blocking=True)
+    if loss_name == "legal_ce":
+        row_losses = legal_masked_cross_entropy(
+            logits,
+            targets,
+            legal_indices,
+            legal_mask,
+            reduction="none",
+        )
+        return _weighted_mean(row_losses, weights), logits, len(targets)
+
+    values = batch["candidate_values"].to(device, non_blocking=True)
+    value_mask = batch["candidate_mask"].to(device, non_blocking=True)
+    row_losses, valid = candidate_listwise_loss(
+        logits,
+        legal_indices,
+        legal_mask,
+        values,
+        value_mask,
+        temperature=args.listwise_temperature,
+        tie_tolerance=args.tie_tolerance,
+        reduction="none",
+    )
+    valid_weights = weights[valid]
+    if not len(row_losses):
+        return logits.sum() * 0.0, logits, 0
+    return _weighted_mean(row_losses, valid_weights), logits, len(row_losses)
+
+
+def _evaluate(
+    net, dataset, loss_name: str, device, args
+) -> tuple[float, dict[str, Any]]:
+    import torch
+
+    accumulator = DecisionMetricAccumulator()
+    loss_total = 0.0
+    loss_rows = 0
+    net.eval()
+    with torch.no_grad():
+        for batch in dataset.loader(num_workers=args.num_workers):
+            loss, logits, used_rows = _batch_loss(net, batch, loss_name, device, args)
+            if used_rows:
+                loss_total += float(loss.detach().cpu()) * used_rows
+                loss_rows += used_rows
+            accumulator.update(
+                logits.detach().cpu().numpy(),
+                batch["targets"].numpy(),
+                action_types=batch["action_types"],
+                num_legal=(
+                    batch["num_legal"] if batch["has_decision_metadata"] else None
+                ),
+                legal_actions=(
+                    batch["legal_actions"] if batch["has_decision_metadata"] else None
+                ),
+                candidate_values=batch["candidate_values_raw"],
+            )
+    if not accumulator.rows:
+        return float("nan"), {}
+    metrics = accumulator.compute()
+    return loss_total / loss_rows if loss_rows else float("nan"), metrics
+
+
+def _selection_value(metrics: dict[str, Any], val_loss: float) -> tuple[str, float]:
+    regret = metrics.get("mean_regret")
+    if regret is not None:
+        name, value = "mean_regret", float(regret)
+    else:
+        name, value = "val_loss", float(val_loss)
+    if not math.isfinite(value):
+        raise ValueError(
+            f"Validation produced no finite {name}; verify that held-out rows "
+            "contain the metadata required by the selected loss"
+        )
+    return name, value
 
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
+    if args.epochs <= 0:
+        raise ValueError("epochs must be positive")
+    seed = args.split_seed if args.seed is None else args.seed
+    seed_everything(seed)
 
     import torch
-    from torch import nn
 
+    command_args = list(argv) if argv is not None else sys.argv[1:]
     tracker = (
-        TrainingRunTracker(args.run_dir, command=["colonist_1v1_bc.py", *argv])
-        if args.run_dir and argv is not None
-        else TrainingRunTracker(args.run_dir, command=None) if args.run_dir else None
+        TrainingRunTracker(args.run_dir, command=["colonist_1v1_bc.py", *command_args])
+        if args.run_dir
+        else None
     )
     if tracker:
-        tracker.phase("bc_training", data_dirs=[str(p) for p in args.data_dir])
+        tracker.phase("bc_training", data_dirs=[str(path) for path in args.data_dir])
 
-    df = load_teacher_parquet(args.data_dir)
-    feat_cols = sorted(c for c in df.columns if c.startswith("F_"))
-    if not feat_cols:
-        raise ValueError("No F_* feature columns found (vector teacher logs).")
-    if "ACTION" not in df.columns:
-        raise ValueError("Parquet must include ACTION column.")
-
-    x = torch.as_tensor(df[feat_cols].to_numpy(np.float32))
-    y = torch.as_tensor(df["ACTION"].to_numpy(np.int64))
-
-    n = x.shape[0]
-
-    # Honest split: group whole games into train/val/test so rows from one game
-    # never leak across splits (dataset v2). Legacy logs without GAME_ID fall
-    # back to the old row-level split with a warning.
-    has_v2 = GAME_ID_COLUMN in df.columns
-    if has_v2:
-        train_mask, val_mask, test_mask = grouped_split_masks(
-            df[GAME_ID_COLUMN].to_numpy(),
-            val_fraction=args.val_fraction,
-            test_fraction=args.test_fraction,
-            seed=args.split_seed,
+    model_schema = build_model_schema(feature_profile=args.feature_profile)
+    paths = _resolve_dataset_paths(
+        args.data_dir,
+        expected_schema=model_schema,
+        allow_legacy_schema=args.allow_legacy_dataset_schema,
+    )
+    print(f"Hashing {len(paths):,} selected input shards ...")
+    input_shards, dataset_sha256 = hash_parquet_shards(paths)
+    print(f"dataset_sha256={dataset_sha256}")
+    if tracker:
+        tracker.event(
+            "bc_dataset_hashed",
+            dataset_sha256=dataset_sha256,
+            input_shards=input_shards,
         )
-    else:
+        tracker.update_manifest(
+            bc_dataset={
+                "dataset_sha256": dataset_sha256,
+                "input_shards": input_shards,
+            }
+        )
+    plan = inspect_parquet_dataset(
+        paths,
+        val_fraction=args.val_fraction,
+        test_fraction=args.test_fraction,
+        seed=args.split_seed,
+    )
+    has_legal = LEGAL_ACTIONS_COLUMN in plan.available_columns
+    has_candidates = CANDIDATE_VALUES_COLUMN in plan.available_columns
+    loss_name = args.loss
+    if loss_name == "auto":
+        loss_name = "legal_ce" if has_legal else "cross_entropy"
+    if loss_name in {"legal_ce", "listwise"} and not has_legal:
+        raise ValueError(
+            f"--loss {loss_name} requires dataset-v2 {LEGAL_ACTIONS_COLUMN}; "
+            "regenerate teacher data or use --loss cross_entropy for legacy logs"
+        )
+    if loss_name == "listwise" and not has_candidates:
+        raise ValueError(
+            f"--loss listwise requires scored {CANDIDATE_VALUES_COLUMN} rows"
+        )
+
+    schema_features = tuple(
+        f"F_{name}" for name in model_schema["observation"]["features"]
+    )
+    if plan.feature_columns != schema_features:
+        raise ValueError(
+            "Dataset feature order does not match the requested model schema: "
+            f"dataset={len(plan.feature_columns)} schema={len(schema_features)}"
+        )
+    schema_actions = len(model_schema["actions"])
+    if args.n_actions != schema_actions:
+        raise ValueError(
+            f"--n-actions {args.n_actions} does not match action schema {schema_actions}"
+        )
+
+    device = resolve_torch_device(args.device)
+    print(
+        f"dataset shards={len(plan.paths):,} train_rows={plan.rows_for('train'):,} "
+        f"val_rows={plan.rows_for('val'):,} test_rows={plan.rows_for('test'):,}"
+    )
+    if not plan.has_game_ids:
         print(
-            f"WARNING: no {GAME_ID_COLUMN} column (legacy dataset); falling back to a "
-            "row-level split. Regenerate data for honest by-game validation."
+            "WARNING: legacy dataset has no GAME_ID; splitting by whole Parquet shard. "
+            "Regenerate data for explicit by-game identities and legal-action learning."
         )
-        rng = np.random.default_rng(args.split_seed)
-        shuffled = rng.permutation(n)
-        n_val = int(n * args.val_fraction)
-        n_test = int(n * args.test_fraction)
-        val_mask = np.zeros(n, dtype=bool)
-        test_mask = np.zeros(n, dtype=bool)
-        val_mask[shuffled[:n_val]] = True
-        test_mask[shuffled[n_val : n_val + n_test]] = True
-        train_mask = ~(val_mask | test_mask)
+    print(f"loss={loss_name} device={device} seed={seed}")
 
-    train_idx = np.flatnonzero(train_mask)
-    if args.hard_states and has_v2:
-        weights = hard_state_sample_weights(df.iloc[train_idx])
-        if weights.sum() > 0:
-            rng = np.random.default_rng(args.split_seed)
-            probs = weights / weights.sum()
-            n_keep = int((weights > 0).sum())
-            picks = rng.choice(len(train_idx), size=n_keep, replace=True, p=probs)
-            train_idx = train_idx[picks]
-            print(
-                f"hard-states: resampled train split to {n_keep} rows "
-                f"(from {int(train_mask.sum())}) toward genuine decisions."
-            )
-    train_t = torch.as_tensor(train_idx)
-    val_t = torch.as_tensor(np.flatnonzero(val_mask))
-    x_train, y_train = x[train_t], y[train_t]
-    x_val, y_val = x[val_t], y[val_t]
-    n_val = int(val_mask.sum())
+    sample_weight_fn = hard_state_sample_weights if args.hard_states else None
+    train_data = ParquetDecisionBatches(
+        plan,
+        "train",
+        batch_size=args.batch_size,
+        seed=seed,
+        shuffle=True,
+        sample_weight_fn=sample_weight_fn,
+    )
+    val_data = ParquetDecisionBatches(
+        plan, "val", batch_size=args.batch_size, seed=seed
+    )
+    test_data = ParquetDecisionBatches(
+        plan, "test", batch_size=args.batch_size, seed=seed
+    )
 
-    # Decision-quality columns for honest validation metrics (v2 only).
-    has_candidates = has_v2 and CANDIDATE_VALUES_COLUMN in df.columns
-
-    def decision_columns(mask):
-        if not has_v2:
-            return None, None, None, None
-        action_types = df["ACTION_TYPE"].to_numpy()[mask]
-        num_legal = df[NUM_LEGAL_COLUMN].to_numpy()[mask]
-        legal_actions = df[LEGAL_ACTIONS_COLUMN].to_numpy()[mask]
-        candidates = (
-            df[CANDIDATE_VALUES_COLUMN].to_numpy()[mask] if has_candidates else None
-        )
-        return action_types, num_legal, legal_actions, candidates
-
-    (
-        val_action_types,
-        val_num_legal,
-        val_legal_actions,
-        val_candidate_values,
-    ) = decision_columns(val_mask)
-
-    n_actions = max(args.n_actions, int(y.max().item() + 1))
-    obs_dim = x.shape[1]
     hidden = tuple(args.hidden)
-
-    net = build_mlp_layers(obs_dim, n_actions, hidden)
-
-    opt = torch.optim.Adam(net.parameters(), lr=args.lr)
-    loss_fn = nn.CrossEntropyLoss()
-
+    net = build_mlp_layers(len(plan.feature_columns), args.n_actions, hidden).to(device)
+    optimizer = torch.optim.Adam(net.parameters(), lr=args.lr)
     writer = None
     if args.tensorboard is not None:
         from torch.utils.tensorboard import SummaryWriter
@@ -189,122 +397,169 @@ def main(argv: list[str] | None = None) -> None:
         args.tensorboard.mkdir(parents=True, exist_ok=True)
         writer = SummaryWriter(log_dir=str(args.tensorboard))
 
-    def evaluate(xb, yb, action_types, num_legal, legal_actions, candidate_values):
-        with torch.no_grad():
-            logits = net(xb)
-            loss = float(loss_fn(logits, yb).item())
-        m = decision_metrics(
-            logits.cpu().numpy(),
-            yb.cpu().numpy(),
-            action_types=action_types,
-            num_legal=num_legal,
-            legal_actions=legal_actions,
-            candidate_values=candidate_values,
-        )
-        return loss, m
+    best_state = None
+    best_epoch = None
+    best_metric_name = None
+    best_metric_value = float("inf")
+    best_val_loss = float("nan")
+    best_val_metrics: dict[str, Any] = {}
+    last_train_rows = 0
+    try:
+        for epoch in range(args.epochs):
+            train_data.set_epoch(epoch)
+            net.train()
+            epoch_loss_total = 0.0
+            epoch_loss_rows = 0
+            seen_rows = 0
+            for batch in train_data.loader(num_workers=args.num_workers):
+                optimizer.zero_grad(set_to_none=True)
+                loss, _, used_rows = _batch_loss(net, batch, loss_name, device, args)
+                seen_rows += len(batch["targets"])
+                if not used_rows:
+                    continue
+                loss.backward()
+                optimizer.step()
+                epoch_loss_total += float(loss.detach().cpu()) * used_rows
+                epoch_loss_rows += used_rows
+            if not epoch_loss_rows:
+                raise ValueError(
+                    f"No usable rows for {loss_name}; candidate-valued choice rows are required"
+                )
+            last_train_rows = seen_rows
+            train_loss = epoch_loss_total / epoch_loss_rows
+            if plan.rows_for("val"):
+                val_loss, val_metrics = _evaluate(
+                    net, val_data, loss_name, device, args
+                )
+            else:
+                val_loss, val_metrics = train_loss, {}
+            metric_name, metric_value = _selection_value(val_metrics, val_loss)
+            if metric_value < best_metric_value:
+                best_metric_value = metric_value
+                best_metric_name = metric_name
+                best_epoch = epoch + 1
+                best_val_loss = val_loss
+                best_val_metrics = copy.deepcopy(val_metrics)
+                best_state = {
+                    key: value.detach().cpu().clone()
+                    for key, value in net.state_dict().items()
+                }
 
-    val_metrics: dict = {}
-    for epoch in range(args.epochs):
-        perm_t = torch.randperm(x_train.shape[0])
-        losses = []
-        for start in range(0, x_train.shape[0], args.batch_size):
-            idx = perm_t[start : start + args.batch_size]
-            logits = net(x_train[idx])
-            loss = loss_fn(logits, y_train[idx])
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
-            losses.append(loss.item())
-        train_loss = float(np.mean(losses))
-
-        if n_val:
-            val_loss, val_metrics = evaluate(
-                x_val,
-                y_val,
-                val_action_types,
-                val_num_legal,
-                val_legal_actions,
-                val_candidate_values,
+            val_acc = val_metrics.get("accuracy", float("nan"))
+            choice_acc = val_metrics.get(
+                "legal_choice_accuracy", val_metrics.get("choice_accuracy")
             )
-        else:
-            val_loss, val_metrics = train_loss, {}
-        val_acc = val_metrics.get("accuracy", float("nan"))
-        # Honest headline: accuracy on genuine choices within the legal set.
-        choice_acc = val_metrics.get(
-            "legal_choice_accuracy", val_metrics.get("choice_accuracy")
-        )
-        choice_str = f"  choice_acc={choice_acc:.4f}" if choice_acc is not None else ""
-        regret = val_metrics.get("mean_regret")
-        regret_str = f"  regret={regret:.4f}" if regret is not None else ""
-        print(
-            f"epoch {epoch + 1}/{args.epochs}  train_loss={train_loss:.4f}  "
-            f"val_loss={val_loss:.4f}  val_acc={val_acc:.4f}{choice_str}{regret_str}"
-        )
+            choice_text = (
+                f" choice_acc={choice_acc:.4f}" if choice_acc is not None else ""
+            )
+            regret = val_metrics.get("mean_regret")
+            regret_text = f" regret={regret:.4f}" if regret is not None else ""
+            print(
+                f"epoch {epoch + 1}/{args.epochs} train_loss={train_loss:.4f} "
+                f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}"
+                f"{choice_text}{regret_text}"
+            )
+            if writer is not None:
+                writer.add_scalar("loss/train", train_loss, epoch)
+                writer.add_scalar("loss/val", val_loss, epoch)
+                writer.add_scalar("accuracy/val", val_acc, epoch)
+                for key in (
+                    "legal_choice_accuracy",
+                    "legal_top3_accuracy",
+                    "mean_regret",
+                ):
+                    if key in val_metrics:
+                        writer.add_scalar(f"metrics/{key}", val_metrics[key], epoch)
+            if tracker:
+                tracker.event(
+                    "bc_epoch",
+                    epoch=epoch + 1,
+                    epochs=args.epochs,
+                    train_loss=train_loss,
+                    val_loss=val_loss,
+                    val_accuracy=val_acc,
+                    selection_metric=metric_name,
+                    selection_value=metric_value,
+                    **{
+                        key: value
+                        for key, value in val_metrics.items()
+                        if key != "accuracy"
+                    },
+                )
+    finally:
         if writer is not None:
-            writer.add_scalar("loss/train", train_loss, epoch)
-            writer.add_scalar("loss/val", val_loss, epoch)
-            writer.add_scalar("accuracy/val", val_acc, epoch)
-            for key in ("legal_choice_accuracy", "legal_top3_accuracy", "mean_regret"):
-                if key in val_metrics:
-                    writer.add_scalar(f"metrics/{key}", val_metrics[key], epoch)
-        if tracker:
-            tracker.event(
-                "bc_epoch",
-                epoch=epoch + 1,
-                epochs=args.epochs,
-                train_loss=train_loss,
-                val_loss=val_loss,
-                val_accuracy=val_acc,
-                **{k: v for k, v in val_metrics.items() if k != "accuracy"},
-            )
-    if writer is not None:
-        writer.close()
+            writer.close()
 
-    # Final held-out test report (by game), if requested.
-    if int(test_mask.sum()) > 0:
-        test_t = torch.as_tensor(np.flatnonzero(test_mask))
-        (
-            test_action_types,
-            test_num_legal,
-            test_legal_actions,
-            test_candidate_values,
-        ) = decision_columns(test_mask)
-        _, test_metrics = evaluate(
-            x[test_t],
-            y[test_t],
-            test_action_types,
-            test_num_legal,
-            test_legal_actions,
-            test_candidate_values,
-        )
-        print(f"test  {test_metrics}")
+    if best_state is None:  # Defensive; positive epochs and usable rows set this.
+        best_state = {
+            key: value.detach().cpu() for key, value in net.state_dict().items()
+        }
+        best_epoch = args.epochs
+        best_metric_name = "train_loss"
+        best_metric_value = train_loss
+        best_val_loss = train_loss
+    net.load_state_dict(best_state)
+    net.to(device)
+
+    test_metrics: dict[str, Any] = {}
+    if plan.rows_for("test"):
+        test_loss, test_metrics = _evaluate(net, test_data, loss_name, device, args)
+        test_metrics = {"loss": test_loss, **test_metrics}
+        print(f"test {test_metrics}")
         if tracker:
             tracker.event("bc_test", **test_metrics)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(net.state_dict(), args.out)
+    torch.save(best_state, args.out)
+    schema_path = write_model_schema(checkpoint_schema_path(args.out), model_schema)
     meta = BcCheckpointMeta(
-        obs_dim=obs_dim,
-        n_actions=n_actions,
+        obs_dim=len(plan.feature_columns),
+        n_actions=args.n_actions,
         hidden_sizes=list(hidden),
         epochs=args.epochs,
-        val_accuracy=val_acc if n_val else None,
-        train_rows=int(x_train.shape[0]),
-        data_dirs=[str(p) for p in args.data_dir],
-        val_loss=val_loss if n_val else None,
+        val_accuracy=best_val_metrics.get("accuracy"),
+        train_rows=last_train_rows,
+        data_dirs=[str(path) for path in args.data_dir],
+        val_loss=best_val_loss,
+        loss_name=loss_name,
+        listwise_temperature=(
+            args.listwise_temperature if loss_name == "listwise" else None
+        ),
+        seed=seed,
+        device=str(device),
+        best_epoch=best_epoch,
+        selection_metric=best_metric_name,
+        selection_value=best_metric_value,
+        val_rows=plan.rows_for("val"),
+        test_rows=plan.rows_for("test"),
+        val_metrics=(
+            {"loss": best_val_loss, **best_val_metrics} if plan.rows_for("val") else {}
+        ),
+        test_metrics=test_metrics,
+        model_schema=model_schema,
+        input_shards=input_shards,
+        dataset_sha256=dataset_sha256,
     )
-    meta.save(args.out.with_suffix(".meta.json"))
+    meta_path = args.out.with_suffix(".meta.json")
+    meta.save(meta_path)
     if tracker:
         tracker.event(
             "bc_complete",
             checkpoint=str(args.out),
-            meta_path=str(args.out.with_suffix(".meta.json")),
-            val_accuracy=val_acc if n_val else None,
+            meta_path=str(meta_path),
+            schema_path=str(schema_path),
+            best_epoch=best_epoch,
+            selection_metric=best_metric_name,
+            selection_value=best_metric_value,
         )
-        tracker.update_manifest(bc_checkpoint=str(args.out), phase="bc_complete")
+        tracker.update_manifest(
+            bc_checkpoint=str(args.out),
+            bc_schema=str(schema_path),
+            phase="bc_complete",
+        )
     print(
-        f"Wrote {args.out} and {args.out.with_suffix('.meta.json')}  "
-        f"(obs_dim={obs_dim}, n_actions={n_actions})"
+        f"Wrote {args.out}, {meta_path}, and {schema_path} "
+        f"(best_epoch={best_epoch}, {best_metric_name}={best_metric_value:.6f})"
     )
 
 

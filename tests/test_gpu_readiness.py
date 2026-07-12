@@ -24,6 +24,7 @@ from catanatron.gym.colonist_training import (
     load_teacher_parquet,
     make_mixed_opponent_factory,
 )
+from catanatron.gym.bc_training import hash_parquet_shards
 from catanatron.gym.tui_data import summarize_run
 from examples import colonist_1v1_generate_data
 from examples.colonist_1v1_bc import DEFAULT_BC_CHECKPOINT_PATH, build_parser
@@ -172,6 +173,13 @@ def test_generator_resumes_without_duplicate_games(tmp_path):
     final_meta = json.loads(meta_path.read_text())
     assert final_meta["status"] == "complete"
     assert final_meta["completed_games"] == 4
+    assert len(final_meta["dataset_sha256"]) == 64
+    assert all(len(row["sha256"]) == 64 for row in final_meta["files"])
+    assert (output / final_meta["schema_path"]).exists()
+    _, bc_dataset_hash = hash_parquet_shards(
+        sorted(output.glob("*.parquet")), progress=False
+    )
+    assert final_meta["dataset_sha256"] == bc_dataset_hash
 
 
 def test_generator_rejects_resume_configuration_mismatch(tmp_path):
@@ -293,6 +301,19 @@ def test_dummy_and_subproc_env_shapes_and_masks_match():
         assert dummy_obs.shape == subproc_obs.shape
         assert get_action_masks(dummy).shape == get_action_masks(subproc).shape
         assert np.array_equal(get_action_masks(dummy), get_action_masks(subproc))
+        for _ in range(12):
+            dummy_masks = get_action_masks(dummy)
+            subproc_masks = get_action_masks(subproc)
+            assert np.array_equal(dummy_masks, subproc_masks)
+            actions = np.asarray(
+                [int(np.flatnonzero(mask)[0]) for mask in dummy_masks],
+                dtype=np.int64,
+            )
+            dummy_obs, dummy_rewards, dummy_done, _ = dummy.step(actions)
+            subproc_obs, subproc_rewards, subproc_done, _ = subproc.step(actions)
+            np.testing.assert_array_equal(dummy_obs, subproc_obs)
+            np.testing.assert_allclose(dummy_rewards, subproc_rewards, rtol=1e-7)
+            np.testing.assert_array_equal(dummy_done, subproc_done)
     finally:
         dummy.close()
         subproc.close()

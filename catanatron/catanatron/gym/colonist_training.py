@@ -355,38 +355,84 @@ def build_mlp_layers(
     return nn.Sequential(*layers)
 
 
-def warmstart_bc_into_maskable_ppo(policy: Any, bc_state: dict) -> int:
+def warmstart_bc_into_maskable_ppo(
+    policy: Any,
+    bc_state: dict,
+    *,
+    checkpoint_schema: Optional[dict[str, Any]] = None,
+    expected_schema: Optional[dict[str, Any]] = None,
+) -> int:
     """
     Copy BC ``Sequential`` weights into SB3 ``MaskableActorCriticPolicy``.
 
-    Maps BC layers ``0``, ``2`` to ``mlp_extractor.policy_net`` and ``4`` to ``action_net``.
-    Returns number of parameter tensors loaded.
+    Every actor layer and tensor must be present with an identical shape.  The
+    old best-effort behavior could silently load only the first layer and still
+    report success, producing a policy that was mostly random. Validation is
+    completed before the first tensor is mutated, so failure is atomic.
+
+    When schemas are supplied they are checked before shape validation. Both
+    must be supplied together; callers must never imply semantic compatibility
+    from tensor shape alone. Returns the number of copied parameter tensors.
     """
     import torch
 
-    def _copy_linear(dst: torch.nn.Linear, prefix: str) -> int:
-        n = 0
-        w = bc_state.get(f"{prefix}.weight")
-        b = bc_state.get(f"{prefix}.bias")
-        if w is not None and dst.weight.shape == w.shape:
-            dst.weight.data.copy_(w)
-            n += 1
-        if b is not None and dst.bias is not None and dst.bias.shape == b.shape:
-            dst.bias.data.copy_(b)
-            n += 1
-        return n
+    if (checkpoint_schema is None) != (expected_schema is None):
+        raise ValueError(
+            "checkpoint_schema and expected_schema must be supplied together"
+        )
+    if checkpoint_schema is not None and expected_schema is not None:
+        from catanatron.gym.model_schema import validate_model_schema
 
-    loaded = 0
+        validate_model_schema(
+            expected_schema, checkpoint_schema, context="BC warm-start"
+        )
+
     pi_linears = [
         m for m in policy.mlp_extractor.policy_net if isinstance(m, torch.nn.Linear)
     ]
-    for pi_layer, bc_idx in zip(pi_linears, (0, 2)):
-        loaded += _copy_linear(pi_layer, str(bc_idx))
+    action_net = getattr(policy, "action_net", None)
+    if not isinstance(action_net, torch.nn.Linear):
+        raise ValueError("PPO policy has no linear action_net to warm-start")
+    destinations = [*pi_linears, action_net]
+    source_prefixes = sorted(
+        {
+            key.removesuffix(".weight")
+            for key, value in bc_state.items()
+            if key.endswith(".weight") and getattr(value, "ndim", None) == 2
+        },
+        key=lambda prefix: (0, int(prefix)) if prefix.isdigit() else (1, prefix),
+    )
+    if len(source_prefixes) != len(destinations):
+        raise ValueError(
+            "BC/PPO actor depth mismatch: "
+            f"checkpoint has {len(source_prefixes)} linear layers, "
+            f"policy has {len(destinations)}"
+        )
 
-    if hasattr(policy, "action_net"):
-        loaded += _copy_linear(policy.action_net, "4")
+    copy_plan = []
+    for layer_index, (prefix, destination) in enumerate(
+        zip(source_prefixes, destinations, strict=True)
+    ):
+        for parameter_name in ("weight", "bias"):
+            destination_tensor = getattr(destination, parameter_name)
+            source_key = f"{prefix}.{parameter_name}"
+            source_tensor = bc_state.get(source_key)
+            if source_tensor is None:
+                raise ValueError(
+                    f"BC checkpoint is missing required tensor {source_key}"
+                )
+            if destination_tensor.shape != source_tensor.shape:
+                raise ValueError(
+                    f"BC actor layer {layer_index} {parameter_name} shape mismatch: "
+                    f"checkpoint={tuple(source_tensor.shape)} "
+                    f"policy={tuple(destination_tensor.shape)}"
+                )
+            copy_plan.append((destination_tensor, source_tensor))
 
-    return loaded
+    with torch.no_grad():
+        for destination_tensor, source_tensor in copy_plan:
+            destination_tensor.copy_(source_tensor)
+    return len(copy_plan)
 
 
 @dataclass
@@ -399,15 +445,32 @@ class BcCheckpointMeta:
     train_rows: int = 0
     data_dirs: list[str] = field(default_factory=list)
     val_loss: Optional[float] = None
+    loss_name: str = "cross_entropy"
+    listwise_temperature: Optional[float] = None
+    seed: int = 0
+    device: str = "cpu"
+    best_epoch: Optional[int] = None
+    selection_metric: Optional[str] = None
+    selection_value: Optional[float] = None
+    val_rows: int = 0
+    test_rows: int = 0
+    val_metrics: dict[str, Any] = field(default_factory=dict)
+    test_metrics: dict[str, Any] = field(default_factory=dict)
+    model_schema: dict[str, Any] = field(default_factory=dict)
+    input_shards: list[dict[str, Any]] = field(default_factory=list)
+    dataset_sha256: Optional[str] = None
 
     def save(self, path: Path) -> None:
-        path.write_text(json.dumps(asdict(self), indent=2))
+        path.write_text(
+            json.dumps(asdict(self), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
 
 
 def load_bc_checkpoint_meta(path: Path) -> Optional[BcCheckpointMeta]:
     if not path.exists():
         return None
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     return BcCheckpointMeta(**data)
 
 
@@ -428,6 +491,7 @@ class CheckpointLeague:
         self.max_checkpoints = max_checkpoints
         self.league_dir = self.run_dir / "league"
         self.league_dir.mkdir(parents=True, exist_ok=True)
+        self.archive_dir = self.run_dir / "archive" / "league_evictions"
         self._index_path = self.league_dir / "index.json"
         self._entries: list[dict[str, Any]] = self._load_index()
 
@@ -444,6 +508,25 @@ class CheckpointLeague:
         tmp.write_text(json.dumps(self._entries, indent=2))
         os.replace(tmp, self._index_path)
 
+    def _archive_checkpoint(self, checkpoint: Path, *, reason: str) -> None:
+        """Move a checkpoint and schema sidecar into collision-safe storage."""
+        from catanatron.gym.model_schema import checkpoint_schema_path
+
+        token = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S}-{uuid4().hex[:8]}"
+        self.archive_dir.mkdir(parents=True, exist_ok=True)
+        if checkpoint.exists():
+            shutil.move(
+                os.fspath(checkpoint),
+                self.archive_dir
+                / f"{checkpoint.stem}-{reason}-{token}{checkpoint.suffix}",
+            )
+        schema = checkpoint_schema_path(checkpoint)
+        if schema.exists():
+            shutil.move(
+                os.fspath(schema),
+                self.archive_dir / f"{checkpoint.stem}-{reason}-{token}.schema.json",
+            )
+
     def register(
         self,
         checkpoint_path: Union[str, Path],
@@ -451,14 +534,23 @@ class CheckpointLeague:
         label: Optional[str] = None,
         metrics: Optional[dict[str, Any]] = None,
     ) -> str:
-        """Copy checkpoint into league pool; prune to ``max_checkpoints``."""
+        """Copy checkpoint into the pool and reversibly archive evictions."""
+        from catanatron.gym.model_schema import checkpoint_schema_path
+
         src = Path(checkpoint_path)
         if not src.exists():
             raise FileNotFoundError(src)
 
         label = label or src.stem
         dest = self.league_dir / f"{label}{src.suffix}"
-        shutil.copy2(src, dest)
+        src_schema = checkpoint_schema_path(src)
+        dest_schema = checkpoint_schema_path(dest)
+        if (dest.exists() or dest_schema.exists()) and src.resolve() != dest.resolve():
+            self._archive_checkpoint(dest, reason="replaced")
+        if src.resolve() != dest.resolve():
+            shutil.copy2(src, dest)
+        if src_schema.exists():
+            shutil.copy2(src_schema, dest_schema)
 
         entry = {
             "path": str(dest),
@@ -466,14 +558,14 @@ class CheckpointLeague:
             "created_at": utc_now_iso(),
             "metrics": metrics or {},
         }
+        if dest_schema.exists():
+            entry["schema_path"] = str(dest_schema)
         self._entries = [e for e in self._entries if e["path"] != str(dest)]
         self._entries.append(entry)
         while len(self._entries) > self.max_checkpoints:
             old = self._entries.pop(0)
-            try:
-                Path(old["path"]).unlink(missing_ok=True)
-            except OSError:
-                pass
+            old_checkpoint = Path(old["path"])
+            self._archive_checkpoint(old_checkpoint, reason="evicted")
 
         self._save_index()
         return str(dest)
@@ -609,6 +701,26 @@ def make_mixed_opponent_factory(
 
     r = rng or np.random.default_rng()
     player_colors = (Color.BLUE, p1_color)
+    # One closure is created per environment worker. Loading an SB3 archive on
+    # every reset dominates short games, so keep the schema-validated player
+    # until that path's file identity changes.
+    league_model_cache: dict[str, tuple[tuple[int, int], Player]] = {}
+
+    def _load_league_player(checkpoint: str) -> Player:
+        path = Path(checkpoint)
+        stat = path.stat()
+        identity = (stat.st_mtime_ns, stat.st_size)
+        cached = league_model_cache.get(checkpoint)
+        if cached is not None and cached[0] == identity:
+            return cached[1]
+        player = load_sb3_player(
+            checkpoint,
+            p1_color,
+            map_type=map_type,
+            player_colors=player_colors,
+        )
+        league_model_cache[checkpoint] = (identity, player)
+        return player
 
     def _factory() -> Player:
         nonlocal teacher_codes, league_weight, teacher_weight, baseline_weight, baseline_code
@@ -627,12 +739,7 @@ def make_mixed_opponent_factory(
                     telemetry.event(
                         "opponent_sampled", source="league", checkpoint=ckpt
                     )
-                return load_sb3_player(
-                    ckpt,
-                    p1_color,
-                    map_type=map_type,
-                    player_colors=player_colors,
-                )
+                return _load_league_player(ckpt)
         if roll < league_weight + teacher_weight and teacher_codes:
             code = str(r.choice(list(teacher_codes)))
             if telemetry:

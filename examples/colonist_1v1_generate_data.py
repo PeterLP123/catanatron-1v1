@@ -20,7 +20,10 @@ import sys
 from pathlib import Path
 
 from catanatron.colonist_1v1 import Colonist1v1TrainConfig
+from catanatron.gym.bc_training import hash_parquet_shards
 from catanatron.gym.colonist_training import touch_run_marker
+from catanatron.gym.model_schema import build_model_schema, write_model_schema
+from catanatron.gym.provenance import collect_run_provenance
 
 
 def _write_meta(path: Path, meta: dict) -> None:
@@ -34,6 +37,10 @@ def _read_meta(path: Path) -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {}
+
+
+def _dataset_hashes(output_dir: Path) -> tuple[list[dict], str]:
+    return hash_parquet_shards(sorted(output_dir.glob("*.parquet")), progress=False)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -78,6 +85,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Label each genuine decision's legal actions with F candidate "
         "values (parquet only, slower). Enables regret metrics and value targets.",
     )
+    p.add_argument(
+        "--feature-profile",
+        choices=("raw", "public_derived"),
+        default="raw",
+        help="Vector observation schema written to F_* columns.",
+    )
     args = p.parse_args(argv)
     if args.num <= 0:
         p.error("--num must be positive")
@@ -88,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
     for stale_tmp in output_dir.glob(".shard-*.tmp.parquet"):
         stale_tmp.unlink(missing_ok=True)
     meta_path = output_dir / "dataset_meta.json"
+    model_schema = build_model_schema(feature_profile=args.feature_profile)
+    schema_path = output_dir / "dataset_schema.json"
     expected = {
         "schema_version": "2.0",
         "teachers": args.teachers,
@@ -99,6 +114,11 @@ def main(argv: list[str] | None = None) -> int:
         "score_candidates": args.score_candidates,
         "include_board_tensor": args.include_board_tensor,
         "colonist_1v1": True,
+        "feature_profile": args.feature_profile,
+        "model_schema_hash": model_schema["schema_hash"],
+        "feature_hash": model_schema["feature_hash"],
+        "action_hash": model_schema["action_hash"],
+        "rules_hash": model_schema["rules_hash"],
     }
     existing_files = list(output_dir.glob("*.parquet"))
     if args.resume:
@@ -122,6 +142,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"{output_dir} already contains dataset artifacts; use --resume or a new output directory"
             )
         touch_run_marker(output_dir)
+        write_model_schema(schema_path, model_schema)
         meta = {
             **expected,
             "status": "in_progress",
@@ -130,6 +151,8 @@ def main(argv: list[str] | None = None) -> int:
             "rows": 0,
             "parquet_files": 0,
             "command": None,
+            "schema_path": schema_path.name,
+            "provenance": collect_run_provenance(),
         }
         _write_meta(meta_path, meta)
 
@@ -141,6 +164,9 @@ def main(argv: list[str] | None = None) -> int:
     remaining = args.num - completed
     if remaining == 0:
         meta["status"] = "complete"
+        file_hashes, dataset_hash = _dataset_hashes(output_dir)
+        meta["files"] = file_hashes
+        meta["dataset_sha256"] = dataset_hash
         _write_meta(meta_path, meta)
         print(f"Dataset already complete: {output_dir}")
         return 0
@@ -167,6 +193,8 @@ def main(argv: list[str] | None = None) -> int:
             str(int(meta.get("parquet_files", 0))),
             "--dataset-meta",
             str(meta_path),
+            "--feature-profile",
+            args.feature_profile,
         ]
     )
     if args.include_board_tensor:
@@ -190,6 +218,9 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         meta["status"] = "complete"
         meta["command"] = " ".join(cmd)
+        file_hashes, dataset_hash = _dataset_hashes(output_dir)
+        meta["files"] = file_hashes
+        meta["dataset_sha256"] = dataset_hash
         _write_meta(meta_path, meta)
         print(f"Wrote {meta_path}")
     return rc
