@@ -230,11 +230,14 @@ If you must run a short evaluation on the GPU host, stop training first and exec
 source "$HOME/.venvs/catanatron-1v1/bin/activate"
 python examples/colonist_1v1_evaluate.py \
   --agent L:runs/ucl_cs_standard_v1/colonist_maskable_ppo.zip \
-  --protocol fast \
-  --num-games 200 \
-  --gates \
-  --report runs/ucl_cs_standard_v1/evaluation.json
+  --protocol milestone --gates \
+  --eval-kind final --gate-mode lower_bound \
+  --report runs/ucl_cs_standard_v1/final_benchmark.json
 ```
+
+The protocol supplies its game count unless `--num-games` is deliberately provided. Keep
+development reports separate; only complete promotion/final seed suites with checkpoint
+hashes can be published under `docs/results/`.
 
 ## Storage and failure handling
 

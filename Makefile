@@ -1,16 +1,23 @@
-.PHONY: install lint test test-1v1 test-gpu-ready smoke train evaluate tui
+.PHONY: install lint test test-installed test-1v1 test-gpu-ready smoke train evaluate tui
 
-PYTHON ?= python3
+PYTHON ?= $(shell if [ -x venv/bin/python ]; then echo venv/bin/python; else command -v python3; fi)
+RUFF ?= $(shell if $(PYTHON) -m ruff --version >/dev/null 2>&1; then echo "$(PYTHON) -m ruff"; elif python3 -m ruff --version >/dev/null 2>&1; then echo "python3 -m ruff"; else echo "$(PYTHON) -m ruff"; fi)
 RUN_DIR ?= runs/colonist_1v1
 
 install:
 	$(PYTHON) -m pip install -e ".[dev,gym,colonist,tui]"
 
 lint:
-	$(PYTHON) -m ruff check catanatron/catanatron examples tests
+	$(RUFF) check catanatron/catanatron examples tests
 
 test:
 	$(PYTHON) -m pytest
+
+test-installed:
+	@PYTHON_BIN="$$(command -v "$(PYTHON)")"; \
+	case "$$PYTHON_BIN" in /*) ;; *) PYTHON_BIN="$(CURDIR)/$$PYTHON_BIN" ;; esac; \
+	cd /tmp && "$$PYTHON_BIN" -c "import catanatron; print(catanatron.__file__)"
+	$(PYTHON) -m pytest tests/test_gpu_readiness.py -k generator_resumes_without_duplicate_games
 
 test-1v1:
 	$(PYTHON) -m pytest tests/test_colonist_1v1.py tests/test_colonist_1v1_training.py tests/test_colonist_1v1_gym_training.py

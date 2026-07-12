@@ -1,157 +1,163 @@
-# Plan: GPU-gated path to a stronger 1v1 bot
+# Plan: evidence-first path to a stronger 1v1 bot
 
-> **Current as of 2026-07-03.** This document records the project direction,
-> evidence, and promotion gates. The executable run order and commands live in
-> [GPU_EXPERIMENT_BACKLOG.md](GPU_EXPERIMENT_BACKLOG.md); measured outcomes live in
-> [RESULTS_LOG.md](RESULTS_LOG.md). If the documents disagree about an experiment,
-> the backlog definition in `catanatron.gym.experiment_backlog` is authoritative.
+> **Current as of 2026-07-12.** The implementation now has stricter evaluation,
+> schema, provenance, BC, search-benchmark, and distillation tooling. The model
+> experiments described below have not thereby happened. Executable GPU queue
+> definitions live in `catanatron.gym.experiment_backlog`, the generated view is
+> [GPU_EXPERIMENT_BACKLOG.md](GPU_EXPERIMENT_BACKLOG.md), and accepted evidence
+> belongs in [RESULTS_LOG.md](RESULTS_LOG.md) and [`docs/results/`](results/README.md).
 
-## Where the project stands
+## Evidence reset
 
-The simulator and training platform are ready for the first GPU run. The current best
-reactive policy, `runs/v2_ppo_fheavy/colonist_maskable_ppo.zip`, is strong against the
-weak tiers and reasonably balanced between seats, but it is not competitive with the
-hand-crafted lookahead tier.
+Every model result recorded before the 2026-07-12 evaluation-accounting repair is
+**provisional**. Turn-limit games could disappear from the denominator and final-VP
+statistics, and older seat labels were not reliable. Those reports can motivate a
+hypothesis, but they cannot promote a checkpoint or establish a current best model.
 
-| Opponent | Current best win rate | Required gate | Status |
-|---|---:|---:|---|
-| `R` | 97.4% | 90% | Pass |
-| `W` | 85.3% | 70% | Pass |
-| `VP` | 85.6% | 60% | Pass |
-| `F` | 1.0% | 52% | Fail |
-| `AB:2` | 0.5% | 52% | Fail |
+The immediate goal is therefore not another long training run. It is a corrected,
+repeatable baseline from which model changes can be measured.
 
-The near-term deliverable is therefore only partially complete: the model convincingly
-beats the random and reactive baselines, but the original goal of competitive play against
-`F` and search opponents remains open.
+## What is implemented
 
-Completed engineering work:
+- every requested evaluation game is now represented as a win, loss, draw/truncation,
+  or error, with final VP and per-game schedule evidence;
+- development, promotion, and final evaluation use disjoint deterministic seed suites;
+- promotion/final gates can use the Wilson confidence lower bound, and paired reports
+  can be compared on shared seat/seed schedules with a bootstrap interval;
+- model artifacts carry feature, action, rules, and combined schema hashes;
+- datasets and runs record shard/data hashes, Git state, Python, package, and hardware
+  provenance;
+- BC streams Parquet shards in batches, splits by whole game, supports CPU/CUDA/MPS,
+  and can train with legacy full-space CE, legal-masked CE, or candidate-value listwise
+  loss;
+- the MCTS benchmark records latency and two-seat strength for held-out seed suites;
+- the DAgger/search-distillation CLI can collect immutable student-visited datasets
+  with deterministic F or fixed-simulation MCTS labels;
+- the backlog has evidence-derived `accepted`, `rejected`, and `inconclusive` states;
+- compact result publishing, reversible checkpoint archival, and CPU CI are available.
 
-- two-seat evaluation with fixed seat order and deterministic seed schedules;
-- behavioral cloning, MaskablePPO, mixed leagues, curricula, checkpointing, and strength reports;
-- hard-state sampling, candidate-action scoring, held-out decision regret, and F-leaf evaluation;
-- MCTS correctness fixes, transposition caching, latency budgets, and search profiling;
-- reproducible UCL CS and Myriad GPU setup, launch, monitoring, and evaluation scripts;
-- a dependency-gated experiment queue with explicit promotion and stop rules.
+## What is not yet evidence
 
-No GPU backlog experiment has completed yet. `00-gpu-smoke` is the next action.
+- no legacy checkpoint has been re-evaluated under the repaired accounting;
+- `05-mcts-strength-sweep` has not been run;
+- legal-masked and listwise BC have not been compared on a locked held-out corpus;
+- no DAgger/search-distillation iteration has been used to train and evaluate a model;
+- no GPU backlog experiment has completed;
+- no 5M promotion or AlphaZero-style training has been justified or run.
 
-## What the failed work established
+## Execution order
 
-Four materially different approaches all remained at roughly 0-1% against `F`:
+### 0. Repair and freeze the measurement surface
 
-| Approach | Result against `F` | What it ruled out |
-|---|---:|---|
-| Self-play PPO, 500k steps | 0.5% | More unanchored model-free training is not enough |
-| BC on 5.4M samples | 0.5% | High imitation accuracy does not preserve decision quality |
-| PPO trained directly against `F` | about 1% | Opponent exposure alone does not solve the gap |
-| One-ply search with a learned value net | 0.5% | Search structure alone does not replace a useful value gradient |
+The code work is implemented. Before using a result, require all requested games to be
+accounted for, zero evaluator errors, one per-game row per request, a checkpoint hash,
+explicit seat scheduling, and a named seed suite. Publishable evidence must be a locked
+promotion or final report, not a development report.
 
-The strongest diagnosis is a **decision-margin value problem**. Terminal-outcome prediction
-is easy on late, obvious positions and can report high global accuracy while remaining too
-flat or noisy to rank close legal actions in the early and middle game. `F` succeeds because
-its hand-crafted value function supplies a useful preference at those decisions.
+### 1. Run the corrected rebaseline
 
-This evidence changes the execution rule: do not scale another PPO run merely because it
-improves weak-opponent win rates. A candidate must first produce a real `F` signal or a
-materially better `F` victory-point margin.
+Re-evaluate the retained historical checkpoints with the same final protocol, final seed
+suite, both seats, and lower-bound gates. Record truncations and errors explicitly. This
+step answers only what the existing models actually do under trustworthy measurement; it
+does not retroactively validate the old seat splits or exact win rates.
 
-## Current execution plan
+The rebaseline becomes the control for every later branch. If an artifact cannot be tied
+to its checkpoint hash and schema, record it as legacy context rather than promotion
+evidence.
 
-The stages below match the IDs and dependencies in the GPU backlog. Commands, resource
-estimates, and storage guidance are intentionally not duplicated here.
+### 2. Measure repaired MCTS before using search as a teacher
 
-### Stage 0: validate the GPU workflow
+Run `05-mcts-strength-sweep`: 10/25/50/100 ms budgets against `F` and `AB:2`, both seats,
+three held-out seeds, with p95 latency and a complete JSON report. The implementation now
+models the balanced dice deck and robber-steal probabilities used by this rules preset,
+but only measured strength can show whether a practical search budget is useful.
 
-Run `00-gpu-smoke` on the intended UCL host. It must complete 20k steps, produce checkpoints
-and a mid-run evaluation, feed the dashboard, and finish without a CUDA error. Until this
-passes, the training platform is code-complete but not hardware-validated.
+Accept a search teacher only if the sweep is complete, reproducible, and stronger than
+the reactive baseline at an affordable latency. A profile-only run is diagnostic and does
+not satisfy this gate.
 
-### Stage 1: establish the reward baseline
+### 3. Make behavioral cloning learn legal choices
 
-Run the matched seed-101 pair:
+Create one locked train/validation/test split by whole game and compare:
 
-- `10-balanced-actual-s101`: current actual-VP shaping control;
-- `11-balanced-visible-s101`: public-score-only shaping treatment.
+1. legal-masked cross entropy as the baseline;
+2. candidate-value listwise loss on the same scored decisions;
+3. optionally the `public_derived` feature profile against the `raw` control.
 
-Compare two-seat scorecards from the same commit and protocol. Visible-VP shaping wins only
-if it improves weighted score by at least 0.03 without losing the `R`, `W`, or `VP` gates.
-Treat a smaller difference as inconclusive.
+Use deterministic seeds and the same architecture. Select the best epoch by held-out
+regret when candidate values exist, otherwise by validation loss. Do not accept a model on
+raw action accuracy alone. The listwise checkpoint must lower held-out regret and then
+improve locked F/search outcome or VP-margin evidence over the legal-CE checkpoint.
 
-Run only the seed-202 replication for the treatment that wins seed 101:
+### 4. Distil search on states the student actually visits
 
-- `12-balanced-actual-s202`, or
-- `13-balanced-visible-s202`.
+If Stage 2 finds a credible teacher, run small DAgger/expert-iteration cycles:
 
-The direction of the improvement must repeat. Do not run both replications automatically.
+1. let the current student generate its own visited states;
+2. label each legal-action set with F or fixed-simulation MCTS;
+3. verify immutable shard and manifest hashes;
+4. aggregate the new iteration with prior data;
+5. retrain with legal/listwise BC and evaluate on the locked promotion suite.
 
-### Stage 2: test choice-focused behavioral cloning
+Start with tens of games, not a large generation job. Continue only while held-out regret
+and locked gameplay evidence improve. The implemented CLI is a data-collection scaffold;
+it does not claim that expert iteration has already succeeded.
 
-Generate scored hard-state data, train a BC checkpoint with `--hard-states`, and inspect
-held-out legal-choice accuracy and mean regret. Raw action accuracy is not the gate.
+### 5. Run controlled PPO only from an accepted parent
 
-Run `20-hard-bc-actual-s101` only when the checkpoint lowers held-out decision regret. Run
-`21-hard-bc-visible-s101` only if visible-VP reward won Stage 1. Keep the branch only if it
-improves `F` win rate or `F` VP margin over the matched reward baseline while retaining the
-weak gates.
+PPO is a refinement stage, not the source of a new hypothesis. Hold dataset, model schema,
+PPO hyperparameters, seed suite, and evaluation protocol fixed. Change one treatment at a
+time, beginning with the actual-VP versus visible-VP reward pair only after the corrected
+baseline and teacher/BC decisions are recorded.
 
-### Stage 3: promote only a credible signal
+Use development evaluation for local checkpoint selection only. Promotion and final
+decisions require their disjoint seed suites and confidence-lower-bound gates. Run one
+replication for the winning treatment; treat a paired per-game outcome-score delta below 0.03 as
+inconclusive.
 
-Run `30-strong-promoted` for 5M steps only after a 500k candidate reaches at least 10% against
-`F` and still passes `R >= 90%`, `W >= 70%`, and `VP >= 60%`. The 10% threshold is a
-promotion signal, not the final strength target.
+### 6. Scale only a credible signal
 
-Evaluate a promoted candidate with the milestone and full protocols, including held-out search
-opponents. Require the post-2026-07-01 per-seat results to remain credible; historical seat
-splits from before the seat-order correction are not comparable.
+The 5M `30-strong-promoted` run remains locked behind at least 10% observed win rate versus
+`F` plus retained `R >= 90%`, `W >= 70%`, and `VP >= 60%` gates in complete comparable
+reports. This is an early-signal gate, not the final target. Preserve checkpoint, schema,
+manifest, environment lock, and evaluation evidence before reversible archival.
 
-### Stage 4: optional anchored self-play
+### 7. Consider full AlphaZero only behind an evidence gate
 
-Run `40-selfplay-polish` only after Stage 3 produces a strong anchored parent. Keep it only if
-`F` or search strength improves and each weak-tier result stays within two percentage points of
-the parent. Self-play is a finishing step, not a route around the promotion gate.
+Do not start a policy/value self-play rewrite merely because BC or PPO disappoints. Revisit
+full AlphaZero-style training only if all of these are true:
+
+- repaired MCTS supplies useful targets at a tolerable budget;
+- legal/listwise BC and several DAgger iterations plateau under locked evaluation;
+- controlled PPO cannot turn that teacher signal into further progress;
+- the expected compute and implementation cost are explicitly budgeted.
+
+If those conditions are not met, the correct result is a well-measured reactive policy and
+a documented negative research outcome, not an unbounded training run.
 
 ## Decision gates
 
 | Decision | Evidence required |
 |---|---|
-| GPU workflow is usable | Smoke run completes with CUDA, checkpoints, evaluation, and dashboard output |
-| Reward treatment wins | At least +0.03 weighted score, no weak-gate regression, then same direction on seed 202 |
-| Hard-state BC is worth PPO time | Lower held-out regret before training; better `F` rate or VP margin after training |
-| Candidate deserves 5M steps | At least 10% against `F` and all weak gates retained |
-| Candidate meets the original strength bar | At least 52% against `F` and the required search opponents under two-seat evaluation |
-| Self-play polish is accepted | Search strength rises; weak results stay within two points of the parent |
+| Report is usable | All games accounted; zero evaluator errors; per-game rows, checkpoint hash, both seats, named seed suite |
+| Historical checkpoint becomes the baseline | Corrected final-suite re-evaluation published; no legacy seat claims carried forward |
+| Search can teach | Complete `05` sweep with required budgets/opponents/seeds and p95 latency |
+| Listwise BC beats baseline BC | Lower held-out regret plus better locked F/search result or VP margin |
+| DAgger iteration is retained | Verified immutable data and improvement over its parent on held-out regret and promotion evidence |
+| PPO treatment wins | Paired gain at least 0.03, weak gates retained, direction repeated on one new seed |
+| Candidate deserves 5M | F at least 10% and all weak gates retained in complete comparable reports |
+| AlphaZero work begins | Useful search teacher, distillation plateau, PPO plateau, and explicit compute budget |
 
-Stop a run on NaNs, repeated CUDA errors, a full disk, or no progress events for 15 minutes.
-Do not infer a winner from one seed when the weighted-score difference is below 0.03. Preserve
-the winning checkpoint, manifest, evaluation report, and registry before pruning artifacts.
-
-## If the gated backlog fails
-
-If the 500k candidates remain in the existing 0-4% `F` band, stop the current PPO track. The
-next credible research direction is AlphaZero-style policy/value learning with iterated
-self-play and MCTS-generated policy and value targets. That system is not implemented in the
-current backlog, requires a separate design and compute budget, and has uncertain payoff.
-
-Do not quietly turn that stretch track into another long PPO run. The failed experiments already
-show that scale without decision-margin signal is not a justified use of GPU time.
-
-## Scope and non-goals
-
-- The project remains a local simulator and trainer. It does not connect to or automate Colonist.
-- "Human-like" is measured through reactive play, diverse opponents, seat balance, public-state
-  ablations, and held-out evaluation; no human-game dataset is currently in scope.
-- Search opponents are evaluation anchors. The preferred deployed policy remains reactive unless
-  the project explicitly adopts the AlphaZero research track.
-- Generated data, checkpoints, and reports remain under ignored `data/` and `runs/` directories;
-  comparable outcomes must be recorded in [RESULTS_LOG.md](RESULTS_LOG.md).
+Stop any run on NaNs, repeated CUDA failures, full disk, evaluator errors, incomplete game
+accounting, or no progress events for 15 minutes. Never promote from a development seed suite.
 
 ## Working documents
 
 | Document | Responsibility |
 |---|---|
-| [RESULTS_LOG.md](RESULTS_LOG.md) | Recorded evidence and comparable scorecards |
-| [GPU_EXPERIMENT_BACKLOG.md](GPU_EXPERIMENT_BACKLOG.md) | Run order, commands, resources, dependencies, and stop rules |
-| [TRAINING.md](TRAINING.md) | General training and evaluation reference |
+| [RESULTS_LOG.md](RESULTS_LOG.md) | Historical context and corrected evidence ledger |
+| [GPU_EXPERIMENT_BACKLOG.md](GPU_EXPERIMENT_BACKLOG.md) | Generated queue, commands, resources, gates, and stop rules |
+| [TRAINING.md](TRAINING.md) | Data, BC, distillation, PPO, evaluation, and artifact reference |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Runtime boundaries and evidence flow |
 | [UCL_CS_GPUS.md](UCL_CS_GPUS.md) | Interactive UCL CS GPU-host workflow |
 | [UCL_MYRIAD.md](UCL_MYRIAD.md) | Scheduled Myriad workflow |

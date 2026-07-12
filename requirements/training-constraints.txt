@@ -1,0 +1,11 @@
+# Validated together on 2026-07-12.  Keep this as a compatibility envelope;
+# run manifests record the exact installed package set for each experiment.
+gymnasium==0.29.1
+numpy>=2.2,<3
+pandas>=2.2,<4
+fastparquet>=2024,<2027
+pyarrow>=18,<25
+torch>=2.5,<3
+stable-baselines3>=2.7,<3
+sb3-contrib>=2.7,<3
+tensorboard>=2.18,<3

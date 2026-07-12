@@ -34,7 +34,9 @@ python -m pip install --upgrade pip setuptools wheel
 python -m pip install \
   torch==2.5.1 \
   --index-url https://download.pytorch.org/whl/cu118
-python -m pip install -e "$ROOT[dev,gym,colonist,tui]"
+python -m pip install \
+  -c "$ROOT/requirements/training-constraints.txt" \
+  -e "$ROOT[dev,gym,colonist,tui]"
 
 python - <<'PY'
 import sys

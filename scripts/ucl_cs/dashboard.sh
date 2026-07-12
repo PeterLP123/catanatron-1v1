@@ -12,7 +12,6 @@ REFRESH_SECONDS=${REFRESH_SECONDS:-2}
 }
 
 source "$VENV/bin/activate"
-export PYTHONPATH="$ROOT/catanatron"
 
 ARGS=(
   --run-dir "$RUN_DIR"

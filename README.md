@@ -11,11 +11,13 @@ The retained project contains:
 - a tested Catan game engine and classical search opponents;
 - a two-player rules preset with a 15-point target, balanced dice, friendly robber, and a 9-card discard limit;
 - a Gymnasium environment with action masks;
-- teacher-data generation and behavioral cloning;
+- schema-bound teacher-data generation and streaming behavioral cloning;
+- legal-action and candidate-value losses for decision-focused imitation;
+- deterministic DAgger/search-distillation data collection;
 - MaskablePPO training with curriculum and checkpoint-league opponents;
-- repeatable strength reports and an optional terminal dashboard.
+- evidence-grade strength reports, artifact retention, and an optional terminal dashboard.
 
-The upstream React UI, Flask API, database replay service, experimental package, hosted documentation, deployment files, cloud scripts, and CI workflows are intentionally excluded.
+The upstream React UI, Flask API, database replay service, experimental package, hosted documentation, deployment files, and cloud scripts are intentionally excluded. This fork has a small CPU GitHub Actions workflow for installed-package, lint, and test checks.
 
 ## Quick start
 
@@ -27,7 +29,8 @@ cd catanatron-1v1
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev,gym,colonist,tui]"
+python -m pip install -c requirements/training-constraints.txt \
+  -e ".[dev,gym,colonist,tui]"
 ```
 
 Verify the 1v1 path and run a baseline match:
@@ -52,9 +55,9 @@ The standard workflow is teacher games, behavioral cloning, PPO, then a fixed ev
 python examples/colonist_1v1_generate_data.py \
   --num 5000 --teachers F,F --output data/c1_ff
 
-# 2. Pre-train the policy on teacher actions.
+# 2. Pre-train the policy on legal teacher choices.
 python examples/colonist_1v1_bc.py \
-  --data-dir data/c1_ff --epochs 10 \
+  --data-dir data/c1_ff --epochs 10 --loss legal_ce \
   --out runs/my_bot/bc.pt --run-dir runs/my_bot
 
 # 3. Train with MaskablePPO and mixed league opponents.
@@ -65,11 +68,12 @@ python examples/colonist_1v1_train.py \
 # 4. Evaluate against the milestone opponent battery.
 python examples/colonist_1v1_evaluate.py \
   --agent L:runs/my_bot/colonist_maskable_ppo.zip \
-  --protocol milestone --gates \
-  --report runs/my_bot/evaluation.json
+  --protocol milestone --gates --eval-kind final \
+  --gate-mode lower_bound \
+  --report runs/my_bot/final_benchmark.json
 ```
 
-See [the training guide](docs/TRAINING.md) for presets, artifacts, evaluation caveats, and troubleshooting.
+See [the training guide](docs/TRAINING.md) for feature profiles, BC objectives, distillation, PPO settings, evidence suites, artifacts, and troubleshooting. Historical model numbers recorded before the 2026-07-12 evaluation-accounting fix are provisional; see [the results log](docs/RESULTS_LOG.md) before comparing checkpoints.
 
 UCL users can run the project on [Computer Science RTX GPU hosts](docs/UCL_CS_GPUS.md) or on [Myriad's scheduled V100/A100 nodes](docs/UCL_MYRIAD.md). Both guides include supplied setup and job templates. The [gated GPU experiment backlog](docs/GPU_EXPERIMENT_BACKLOG.md) provides matched runs, resource estimates and promotion rules.
 
@@ -106,7 +110,7 @@ Player specifications are accepted by `catanatron-play` and the evaluation scrip
 | `M:N` | Monte Carlo tree search with `N` simulations |
 | `AB:D` | Alpha-beta search to depth `D` |
 | `L:path.zip` | MaskablePPO checkpoint |
-| `T:path.pt` | Behavioral-cloning checkpoint with adjacent `.meta.json` |
+| `T:path.pt` | Behavioral-cloning checkpoint with adjacent metadata/schema sidecars |
 
 Run `catanatron-play --help-players` for the complete built-in list.
 
@@ -116,21 +120,25 @@ Run `catanatron-play --help-players` for the complete built-in list.
 |---|---|
 | `make test` | Run the retained test suite |
 | `make test-1v1` | Run rules, Gym, training, and evaluation tests |
+| `make test-installed` | Verify imports from outside the checkout |
+| `make test-gpu-ready` | Run CPU checks required before a GPU experiment |
 | `make smoke` | Run the smoke training preset |
 | `make train` | Run the standard preset |
 | `make evaluate` | Evaluate `$(RUN_DIR)/colonist_maskable_ppo.zip` |
 | `make tui` | Open the optional training dashboard |
+| `python examples/colonist_1v1_backlog.py list` | Show evidence-gated experiment status |
 
-Generated datasets, checkpoints, TensorBoard events, and run metadata belong under `data/` and `runs/`; both directories are ignored by Git.
+Generated datasets, checkpoints, TensorBoard events, and run metadata belong under `data/` and `runs/`; both directories are ignored by Git. Compact validated promotion/final summaries can be published under [`docs/results/`](docs/results/README.md).
 
 ## Repository map
 
 | Path | Responsibility |
 |---|---|
 | `catanatron/catanatron/` | Engine, rules adapter, players, Gym environment, training utilities |
-| `examples/colonist_1v1_*.py` | Data, BC, PPO, evaluation, and TUI entry points |
+| `examples/colonist_1v1_*.py` | Data, BC, distillation, PPO, evaluation, evidence, and TUI entry points |
 | `tests/` | Engine and 1v1 regression tests |
 | `docs/` | Rules, training, and architecture documentation |
+| `requirements/training-constraints.txt` | Validated training compatibility envelope |
 | `scripts/local_strength_eval.sh` | Reproducible local end-to-end pipeline |
 
 For module boundaries and extension points, see [the architecture guide](docs/ARCHITECTURE.md).

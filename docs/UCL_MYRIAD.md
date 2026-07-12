@@ -169,6 +169,11 @@ qsub -v MODEL_REL=runs/ucl_standard_v1/colonist_maskable_ppo.zip,PROTOCOL=fast,E
 ```
 
 The report is written next to the model under `ucl_eval_<JOB_ID>/evaluation.json`.
+The supplied scheduler wrapper currently produces a manual point-gate diagnostic report.
+It is useful for cluster operation checks but is not publishable promotion/final evidence.
+For a model decision, run the current evaluation CLI with `--eval-kind final` and
+`--gate-mode lower_bound`, preserve the protocol count, and publish the validated report as
+described in [the training guide](TRAINING.md#6-publish-evidence-and-retain-artifacts).
 
 ## Resource choices
 

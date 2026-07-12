@@ -111,10 +111,16 @@ class JobRunner:
                     bufsize=1,
                 )
                 assert job.process.stdout is not None
-                for line in job.process.stdout:
-                    log.write(line)
-                    log.flush()
-                    self._emit_log(line.rstrip())
+                try:
+                    for line in job.process.stdout:
+                        log.write(line)
+                        log.flush()
+                        self._emit_log(line.rstrip())
+                finally:
+                    # ``Popen.wait`` does not close PIPE file objects.  TUI jobs
+                    # are long-lived, so leaking one descriptor per job becomes
+                    # visible quickly and pytest correctly reports it.
+                    job.process.stdout.close()
                 job.exit_code = job.process.wait()
             job.status = "succeeded" if job.exit_code == 0 else "failed"
         except Exception as exc:  # pragma: no cover - defensive guard for UI jobs
