@@ -25,7 +25,9 @@ from catanatron.colonist_1v1_eval import (
     format_matchup_line,
     get_eval_protocol,
     print_report,
+    resolve_eval_seed,
     run_benchmark,
+    summarize_report,
 )
 
 
@@ -84,6 +86,24 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Base game seed (default: the selected protocol's fixed seed).",
     )
+    p.add_argument(
+        "--eval-kind",
+        choices=("manual", "dev", "promotion", "final", "final_benchmark"),
+        default="manual",
+        help="Evidence purpose; controls report provenance and default seed namespace.",
+    )
+    p.add_argument(
+        "--seed-suite",
+        choices=("manual", "dev", "promotion", "final"),
+        default=None,
+        help="Explicit deterministic seed namespace (normally inferred from --eval-kind).",
+    )
+    p.add_argument(
+        "--gate-mode",
+        choices=("point", "lower_bound"),
+        default="point",
+        help="Use the observed rate or Wilson lower bound for gates.",
+    )
     seat_group = p.add_mutually_exclusive_group()
     seat_group.add_argument(
         "--both-seats",
@@ -119,6 +139,9 @@ def main(argv: list[str] | None = None) -> int:
             checkpoint_label=args.checkpoint_label,
             training_timesteps=args.training_timesteps,
             seed=args.seed,
+            eval_kind=args.eval_kind,
+            seed_suite=args.seed_suite,
+            gate_mode=args.gate_mode,
         )
         print_report(report)
         if args.report:
@@ -129,8 +152,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Updated registry {args.registry}")
         return 0 if report.all_gates_passed or not args.gates else 1
 
+    base_seed = get_eval_protocol(args.protocol).seed
+    inferred_suite = args.seed_suite
+    if inferred_suite is None:
+        inferred_suite = {
+            "dev": "dev",
+            "promotion": "promotion",
+            "final": "final",
+            "final_benchmark": "final",
+        }.get(args.eval_kind, "manual")
     single_seed = (
-        args.seed if args.seed is not None else get_eval_protocol(args.protocol).seed
+        args.seed
+        if args.seed is not None
+        else resolve_eval_seed(base_seed, suite=inferred_suite)
     )
     result = evaluate_matchup(
         args.agent,
@@ -140,12 +174,14 @@ def main(argv: list[str] | None = None) -> int:
         both_seats=args.both_seats,
         quiet=True,
         seed=single_seed,
+        gate_mode=args.gate_mode,
     )
     print(format_matchup_line(result))
     if args.report:
         r = EvaluationReport(
             agent=args.agent,
             matchups=[result],
+            all_gates_passed=result.passed_gate is not False,
             meta=build_eval_meta(
                 agent_spec=args.agent,
                 protocol=EvalProtocol(
@@ -158,13 +194,17 @@ def main(argv: list[str] | None = None) -> int:
                 checkpoint_label=args.checkpoint_label,
                 training_timesteps=args.training_timesteps,
                 both_seats=args.both_seats,
+                eval_kind=args.eval_kind,
+                seed_suite=("explicit" if args.seed is not None else inferred_suite),
+                base_seed=base_seed,
+                gate_mode=args.gate_mode,
+                gates=(
+                    {args.opponent: DEFAULT_BENCHMARK_GATES.get(args.opponent)}
+                    if args.gates
+                    else {}
+                ),
             ),
-            summary={
-                "gates_passed_count": 1 if result.passed_gate else 0,
-                "gates_total": 1 if result.gate is not None else 0,
-                "mean_win_rate": result.win_rate,
-                "weighted_score": result.win_rate,
-            },
+            summary=summarize_report([result]),
         )
         r.write_json(args.report)
         if args.registry:

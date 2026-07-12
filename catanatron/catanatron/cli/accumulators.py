@@ -32,10 +32,6 @@ class VpDistributionAccumulator(GameAccumulator):
         self.num_games = 0
 
     def after(self, game: Game):
-        winner = game.winning_color()
-        if winner is None:
-            return  # throw away data
-
         for color in game.state.colors:
             cities = len(get_player_buildings(game.state, color, CITY))
             settlements = len(get_player_buildings(game.state, color, SETTLEMENT))
@@ -85,6 +81,8 @@ class VpDistributionAccumulator(GameAccumulator):
 class StatisticsAccumulator(GameAccumulator):
     def __init__(self):
         self.wins = defaultdict(int)
+        self.draws = 0
+        self.truncations = 0
         self.turns = []
         self.ticks = []
         self.durations = []
@@ -98,9 +96,14 @@ class StatisticsAccumulator(GameAccumulator):
         duration = time.time() - self.start
         winning_color = game.winning_color()
         if winning_color is None:
-            return  # do not track
-
-        self.wins[winning_color] += 1
+            # ``Game.play`` stops at the turn limit, so a missing winner is an
+            # explicit truncated draw rather than a game to discard. Keeping
+            # it here ensures every requested game and its final VP survive in
+            # ``play_batch`` results and downstream evaluation reports.
+            self.draws += 1
+            self.truncations += 1
+        else:
+            self.wins[winning_color] += 1
         self.turns.append(game.state.num_turns)
         self.ticks.append(len(game.state.action_records))
         self.durations.append(duration)
