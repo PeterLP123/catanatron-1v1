@@ -192,7 +192,7 @@ def create_board_tensor(game: Game, p0_color: Color, channels_first=False):
             (x, y) = node_map[node_id]
             planes[channel_idx][x][y] = 1
 
-    result = np.array(planes)
+    result = np.asarray(planes, dtype=np.float32)
     if not channels_first:
         return np.transpose(result, (1, 2, 0))
     return result

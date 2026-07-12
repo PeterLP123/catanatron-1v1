@@ -40,6 +40,7 @@ class ReinforcementLearningAccumulator(GameAccumulator):
         },
         score_candidates=False,
         value_fn_name="base_fn",
+        feature_profile="raw",
     ):
         self.player_colors = player_colors
         self.map_type = map_type
@@ -52,6 +53,7 @@ class ReinforcementLearningAccumulator(GameAccumulator):
         # by default. Stored as plain config so the accumulator stays picklable.
         self.score_candidates = bool(score_candidates)
         self.value_fn_name = value_fn_name
+        self.feature_profile = feature_profile
         # Lazily-built {(action_type, value): action_index} map, used to record
         # the legal-action set per decision (dataset v2 "honest measurement").
         self._action_index = None
@@ -127,7 +129,13 @@ class ReinforcementLearningAccumulator(GameAccumulator):
             len(self.data["samples"])
         )
         self.data["acting_color"].append(action.color)
-        self.data["samples"].append(create_sample(game_before_action, action.color))
+        self.data["samples"].append(
+            create_sample(
+                game_before_action,
+                action.color,
+                feature_profile=self.feature_profile,
+            )
+        )
         self.data["actions"].append(
             [
                 to_action_space(action, self.player_colors, self.map_type),
@@ -292,6 +300,7 @@ class ParquetDataAccumulator(ReinforcementLearningAccumulator):
         choices_only=False,
         start_shard_index=0,
         dataset_meta=None,
+        feature_profile="raw",
     ):
         super().__init__(
             player_colors,
@@ -299,6 +308,7 @@ class ParquetDataAccumulator(ReinforcementLearningAccumulator):
             include_board_tensor,
             score_candidates=score_candidates,
             value_fn_name=value_fn_name,
+            feature_profile=feature_profile,
         )
         self.output = output
         self.shard_games = max(1, int(shard_games))
@@ -324,6 +334,13 @@ class ParquetDataAccumulator(ReinforcementLearningAccumulator):
                 meta = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             meta = {}
+        existing_profile = meta.get("feature_profile")
+        if existing_profile is not None and existing_profile != self.feature_profile:
+            raise ValueError(
+                "Dataset feature profile changed while appending shards: "
+                f"expected {existing_profile!r}, got {self.feature_profile!r}"
+            )
+        meta["feature_profile"] = self.feature_profile
         meta["completed_games"] = int(meta.get("completed_games", 0)) + games
         meta["rows"] = int(meta.get("rows", 0)) + rows
         meta["parquet_files"] = int(meta.get("parquet_files", 0)) + files

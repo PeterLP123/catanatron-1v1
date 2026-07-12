@@ -95,6 +95,13 @@ class CustomTimeRemainingColumn(TimeRemainingColumn):
     "(parquet only, slower). Enables decision-margin training and regret metrics.",
 )
 @click.option(
+    "--feature-profile",
+    type=click.Choice(["raw", "public_derived"], case_sensitive=False),
+    default="raw",
+    show_default=True,
+    help="Feature schema for Parquet vector rows.",
+)
+@click.option(
     "--seed",
     type=int,
     default=None,
@@ -169,6 +176,7 @@ def simulate(
     output_format,
     include_board_tensor,
     score_candidates,
+    feature_profile,
     seed,
     parquet_shard_games,
     choices_only,
@@ -216,6 +224,7 @@ def simulate(
         choices_only,
         parquet_start_shard,
         dataset_meta,
+        feature_profile,
     )
     game_config = GameConfigOptions.from_cli(
         config_discard_limit,
@@ -251,6 +260,7 @@ class OutputOptions:
     choices_only: bool = False
     parquet_start_shard: int = 0
     dataset_meta: Union[str, None] = None
+    feature_profile: str = "raw"
 
 
 @dataclass(frozen=True)
@@ -422,6 +432,7 @@ def play_batch(
                     choices_only=output_options.choices_only,
                     start_shard_index=output_options.parquet_start_shard,
                     dataset_meta=output_options.dataset_meta,
+                    feature_profile=output_options.feature_profile,
                 )
             )
         elif output_options.output_format == "json":

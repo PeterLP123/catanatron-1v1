@@ -1,4 +1,5 @@
 from functools import lru_cache
+import random
 from typing import Tuple, Literal
 
 from catanatron.models.actions import Action
@@ -12,7 +13,11 @@ from catanatron.models.map import build_map
 def get_action_array(
     player_colors: Tuple[Color], map_type: Literal["BASE", "TOURNAMENT", "MINI"]
 ):
-    catan_map = build_map(map_type)
+    random_state = random.getstate()
+    try:
+        catan_map = build_map(map_type)
+    finally:
+        random.setstate(random_state)
     num_nodes = len(catan_map.land_nodes)
 
     # We sort the actions to ensure a consistent ordering and reproducibility
@@ -74,6 +79,23 @@ def get_action_array(
     return actions_array
 
 
+@lru_cache(maxsize=None)
+def get_action_index(
+    player_colors: Tuple[Color], map_type: Literal["BASE", "TOURNAMENT", "MINI"]
+):
+    """Return the immutable action codec's reverse lookup table.
+
+    Action conversion is on the hottest environment path.  Building this map
+    once avoids a linear ``list.index`` scan for every legal-action mask and
+    every executed action.
+    """
+
+    return {
+        action: index
+        for index, action in enumerate(get_action_array(player_colors, map_type))
+    }
+
+
 ACTION_TYPES = [i for i in ActionType]
 
 
@@ -87,8 +109,8 @@ def to_action_space(
     map_type: Literal["BASE", "TOURNAMENT", "MINI"],
 ):
     """maps action to space_action equivalent integer"""
-    actions_array = get_action_array(player_colors, map_type)
-    return actions_array.index((action.action_type, action.value))
+    action_index = get_action_index(player_colors, map_type)
+    return action_index[(action.action_type, action.value)]
 
 
 def from_action_space(

@@ -147,6 +147,7 @@ def test_mixed_rep():
     observation, info = env.reset()
     assert "board" in observation
     assert "numeric" in observation
+    assert env.observation_space.contains(observation)
 
 
 def test_move_robber_action_in_base_action_array():

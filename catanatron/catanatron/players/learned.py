@@ -6,19 +6,47 @@ Used for self-play wrappers and ``catanatron-play``-style evaluation when regist
 
 from __future__ import annotations
 
+import random
 import os
+from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Iterator, Optional, Sequence, Union
 
 import numpy as np
 
 from catanatron.features import create_sample, get_feature_ordering
 from catanatron.gym.envs.action_space import from_action_space, to_action_space
+from catanatron.gym.model_schema import (
+    build_model_schema,
+    checkpoint_schema_path,
+    read_model_schema,
+    validate_model_schema,
+)
 from catanatron.models.player import Color, Player
 
 if TYPE_CHECKING:
     from catanatron.game import Game
     from catanatron.models.actions import Action
+
+
+@contextmanager
+def _preserve_inference_loader_rng() -> Iterator[None]:
+    """Make inference-only checkpoint construction invisible to trainer RNGs."""
+
+    import torch
+
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    torch_state = torch.random.get_rng_state()
+    cuda_states = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+    try:
+        yield
+    finally:
+        random.setstate(python_state)
+        np.random.set_state(numpy_state)
+        torch.random.set_rng_state(torch_state)
+        if cuda_states is not None:
+            torch.cuda.set_rng_state_all(cuda_states)
 
 
 class Colonist1v1Player(Player):
@@ -39,6 +67,8 @@ class Colonist1v1Player(Player):
         torch_policy=None,
         player_colors: Sequence[Color] = (Color.BLUE, Color.RED),
         deterministic: bool = True,
+        feature_profile: str = "raw",
+        human_visible_obs: bool = False,
     ):
         super().__init__(color)
         if (model is None) == (torch_policy is None):
@@ -48,7 +78,11 @@ class Colonist1v1Player(Player):
 
         self.map_type = map_type
         self.num_players = num_players
-        self.features = get_feature_ordering(num_players, map_type)
+        self.feature_profile = feature_profile
+        self.human_visible_obs = human_visible_obs
+        self.features = get_feature_ordering(
+            num_players, map_type, feature_profile=feature_profile
+        )
         self.player_colors = tuple(player_colors)
         self.model = model
         self.torch_policy = torch_policy
@@ -59,7 +93,11 @@ class Colonist1v1Player(Player):
         self._action_array_len = len(get_action_array(self.player_colors, map_type))
 
     def decide(self, game: "Game", playable_actions: list["Action"]) -> "Action":
-        sample = create_sample(game, self.color)
+        sample = create_sample(game, self.color, feature_profile=self.feature_profile)
+        if self.human_visible_obs and "P0_ACTUAL_VPS" in sample:
+            from catanatron.state_functions import get_visible_victory_points
+
+            sample["P0_ACTUAL_VPS"] = get_visible_victory_points(game.state, self.color)
         obs = np.array([sample[k] for k in self.features], dtype=np.float32)
 
         mask = np.zeros(self._action_array_len, dtype=bool)
@@ -93,17 +131,42 @@ def load_sb3_player(
     map_type: str = "BASE",
     player_colors: Sequence[Color] = (Color.BLUE, Color.RED),
     deterministic: bool = True,
+    feature_profile: Optional[str] = None,
+    human_visible_obs: Optional[bool] = None,
 ) -> Colonist1v1Player:
     """Load :class:`sb3_contrib.ppo_mask.MaskablePPO` from disk and wrap as a Player."""
     from sb3_contrib import MaskablePPO  # type: ignore[import-untyped]
 
-    model = MaskablePPO.load(str(checkpoint))
+    with _preserve_inference_loader_rng():
+        model = MaskablePPO.load(str(checkpoint))
+    stored_schema = getattr(model, "catanatron_model_schema", None)
+    if stored_schema is None:
+        stored_schema = read_model_schema(checkpoint_schema_path(checkpoint))
+    stored_observation = (stored_schema or {}).get("observation", {})
+    resolved_profile = feature_profile or stored_observation.get(
+        "feature_profile", "raw"
+    )
+    resolved_visibility = (
+        bool(human_visible_obs)
+        if human_visible_obs is not None
+        else bool(stored_observation.get("human_visible_obs", False))
+    )
+    if stored_schema is not None:
+        expected_schema = build_model_schema(
+            map_type=map_type,
+            player_colors=player_colors,
+            feature_profile=resolved_profile,
+            human_visible_obs=resolved_visibility,
+        )
+        validate_model_schema(expected_schema, stored_schema, context="SB3 inference")
     return Colonist1v1Player(
         color,
         map_type=map_type,
         model=model,
         player_colors=player_colors,
         deterministic=deterministic,
+        feature_profile=resolved_profile,
+        human_visible_obs=resolved_visibility,
     )
 
 
@@ -116,27 +179,32 @@ def load_torch_bc_player(
     *,
     map_type: str = "BASE",
     player_colors: Sequence[Color] = (Color.BLUE, Color.RED),
+    feature_profile: str = "raw",
+    human_visible_obs: bool = False,
 ) -> Colonist1v1Player:
     """Load a Torch ``state_dict`` saved by ``examples/colonist_1v1_bc.py``."""
     import torch
     from torch import nn
 
-    layers = []
-    d_in = obs_dim
-    for h in hidden_sizes:
-        layers.extend([nn.Linear(d_in, h), nn.ReLU()])
-        d_in = h
-    layers.append(nn.Linear(d_in, n_actions))
-    net = nn.Sequential(*layers)
-    state = torch.load(str(checkpoint), map_location="cpu")
-    net.load_state_dict(state)
-    net.eval()
+    with _preserve_inference_loader_rng():
+        layers = []
+        d_in = obs_dim
+        for h in hidden_sizes:
+            layers.extend([nn.Linear(d_in, h), nn.ReLU()])
+            d_in = h
+        layers.append(nn.Linear(d_in, n_actions))
+        net = nn.Sequential(*layers)
+        state = torch.load(str(checkpoint), map_location="cpu")
+        net.load_state_dict(state)
+        net.eval()
     return Colonist1v1Player(
         color,
         map_type=map_type,
         torch_policy=net,
         player_colors=player_colors,
         deterministic=True,
+        feature_profile=feature_profile,
+        human_visible_obs=human_visible_obs,
     )
 
 
@@ -158,12 +226,36 @@ class TorchBcCheckpointPlayer(Player):
             raise FileNotFoundError(
                 f"Missing BC metadata {meta_path}. Re-run colonist_1v1_bc.py to generate it."
             )
+        stored_schema = read_model_schema(checkpoint_schema_path(ckpt))
+        if stored_schema is None and meta.model_schema:
+            stored_schema = meta.model_schema
+        observation_schema = (stored_schema or {}).get("observation", {})
+        feature_profile = observation_schema.get("feature_profile", "raw")
+        human_visible_obs = bool(observation_schema.get("human_visible_obs", False))
+        if stored_schema is not None:
+            expected_schema = build_model_schema(
+                feature_profile=feature_profile,
+                human_visible_obs=human_visible_obs,
+            )
+            validate_model_schema(
+                expected_schema, stored_schema, context="Torch BC inference"
+            )
+            if meta.obs_dim != len(expected_schema["observation"]["features"]):
+                raise ValueError(
+                    "BC metadata obs_dim does not match its feature schema"
+                )
+            if meta.n_actions != len(expected_schema["actions"]):
+                raise ValueError(
+                    "BC metadata n_actions does not match its action schema"
+                )
         self._inner = load_torch_bc_player(
             ckpt,
             color,
             obs_dim=meta.obs_dim,
             n_actions=meta.n_actions,
             hidden_sizes=meta.hidden_sizes,
+            feature_profile=feature_profile,
+            human_visible_obs=human_visible_obs,
         )
 
     def decide(self, game: "Game", playable_actions: list["Action"]) -> "Action":

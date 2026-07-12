@@ -1,5 +1,6 @@
 from typing import Any, List, Literal, Tuple
 import functools
+import random
 from collections import Counter
 import networkx as nx
 
@@ -495,49 +496,77 @@ def game_features(game: Game, p0_color: Color):
     return features
 
 
-feature_extractors = [
+RAW_FEATURE_EXTRACTORS = (
     # PLAYER FEATURES =====
     player_features,
     resource_hand_features,
-    # TRANSFERABLE BOARD FEATURES =====
-    # build_production_features(True),
-    # build_production_features(False),
-    # expansion_features,
-    # reachability_features,
     # RAW BASE-MAP FEATURES =====
     tile_features,
     port_features,
     graph_features,
     # GAME FEATURES =====
     game_features,
-]
+)
+
+# Cheap, public board-derived features used by the first representation
+# ablation.  These are intentionally limited to signals that a human player can
+# derive from the visible board.  Keeping the profile explicit prevents an old
+# checkpoint from silently receiving a reordered or wider observation vector.
+PUBLIC_DERIVED_FEATURE_EXTRACTORS = (
+    *RAW_FEATURE_EXTRACTORS,
+    build_production_features(True),
+    reachability_features,
+)
+
+FEATURE_PROFILES = {
+    "raw": RAW_FEATURE_EXTRACTORS,
+    "public_derived": PUBLIC_DERIVED_FEATURE_EXTRACTORS,
+}
+
+# Backward-compatible public name.  New code should select a named profile.
+feature_extractors = list(RAW_FEATURE_EXTRACTORS)
 
 
 # TODO: Use OrderedDict instead? To minimize mis-aligned features errors.
-def create_sample(game, p0_color):
+def create_sample(game, p0_color, feature_profile="raw"):
+    try:
+        extractors = FEATURE_PROFILES[feature_profile]
+    except KeyError as exc:
+        choices = ", ".join(sorted(FEATURE_PROFILES))
+        raise ValueError(
+            f"Unknown feature profile {feature_profile!r}; choose one of: {choices}"
+        ) from exc
     record = {}
-    for extractor in feature_extractors:
+    for extractor in extractors:
         record.update(extractor(game, p0_color))
     return record
 
 
-def create_sample_vector(game, p0_color, features=None):
-    features = features or get_feature_ordering(len(game.state.colors))
-    sample_dict = create_sample(game, p0_color)
-    return [float(sample_dict[i]) for i in features if i in sample_dict]
+def create_sample_vector(game, p0_color, features=None, feature_profile="raw"):
+    features = features or get_feature_ordering(
+        len(game.state.colors), feature_profile=feature_profile
+    )
+    sample_dict = create_sample(game, p0_color, feature_profile=feature_profile)
+    return [float(sample_dict[i]) for i in features]
 
 
-@functools.lru_cache(4 * 3)
+@functools.lru_cache(maxsize=None)
 def get_feature_ordering(
-    num_players=4, map_type: Literal["BASE", "MINI", "TOURNAMENT"] = "BASE"
+    num_players=4,
+    map_type: Literal["BASE", "MINI", "TOURNAMENT"] = "BASE",
+    feature_profile="raw",
 ):
-    players = [
-        SimplePlayer(Color.RED),
-        SimplePlayer(Color.BLUE),
-        SimplePlayer(Color.WHITE),
-        SimplePlayer(Color.ORANGE),
-    ]
-    players = players[:num_players]
-    game = Game(players, catan_map=build_map(map_type))
-    sample = create_sample(game, players[0].color)
-    return sorted(sample.keys())
+    random_state = random.getstate()
+    try:
+        players = [
+            SimplePlayer(Color.RED),
+            SimplePlayer(Color.BLUE),
+            SimplePlayer(Color.WHITE),
+            SimplePlayer(Color.ORANGE),
+        ]
+        players = players[:num_players]
+        game = Game(players, catan_map=build_map(map_type))
+        sample = create_sample(game, players[0].color, feature_profile=feature_profile)
+        return sorted(sample.keys())
+    finally:
+        random.setstate(random_state)

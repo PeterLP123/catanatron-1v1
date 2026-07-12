@@ -9,6 +9,7 @@ from catanatron.colonist_1v1 import COLONIST_1V1_SETTINGS, colonist_1v1_game_kwa
 from catanatron.models.player import Color, Player, RandomPlayer
 from catanatron.models.map import build_map
 from catanatron.features import (
+    FEATURE_PROFILES,
     create_sample,
     get_feature_ordering,
 )
@@ -70,6 +71,13 @@ class CatanatronEnv(gym.Env):
         # Optional ablation: hide the acting player's own private VP cards and
         # expose only public score. Normal play legitimately knows its own cards.
         self.human_visible_obs = self.config.get("human_visible_obs", False)
+        self.feature_profile = self.config.get("feature_profile", "raw")
+        if self.feature_profile not in FEATURE_PROFILES:
+            choices = ", ".join(sorted(FEATURE_PROFILES))
+            raise ValueError(
+                f"Unknown feature_profile {self.feature_profile!r}; "
+                f"choose one of: {choices}"
+            )
 
         self.enemies = self.config.get("enemies", [RandomPlayer(Color.RED)])
         self.player_colors = tuple([Color.BLUE] + [p.color for p in self.enemies])
@@ -86,9 +94,18 @@ class CatanatronEnv(gym.Env):
         self._p0_seat_index = 0
         self._rebuild_players()
         self.representation = "mixed" if self.representation == "mixed" else "vector"
-        self.features = get_feature_ordering(len(self.players), self.map_type)
+        self.features = get_feature_ordering(
+            len(self.players), self.map_type, self.feature_profile
+        )
         self.invalid_actions_count = 0
         self.max_invalid_actions = 10
+        self.initial_seed = self.config.get("seed")
+        # The legacy engine uses module-global ``random`` internally.  Keep a
+        # separate state per env and swap it in only while this env is active.
+        # DummyVecEnv calls envs sequentially, while SubprocVecEnv isolates
+        # processes, so this removes cross-env reseeding without changing the
+        # engine-wide public API.
+        self._random_state = random.Random(self.initial_seed).getstate()
 
         # Build action space depending on map type
         self.action_array = get_action_array(self.player_colors, self.map_type)
@@ -98,7 +115,11 @@ class CatanatronEnv(gym.Env):
         if self.representation == "mixed":
             channels = get_channels(len(self.players))
             board_tensor_space = spaces.Box(
-                low=0, high=1, shape=(channels, 21, 11), dtype=self.dtype
+                # Node planes encode settlements as 1 and cities as 2.
+                low=0,
+                high=2,
+                shape=(channels, 21, 11),
+                dtype=self.dtype,
             )
             self.numeric_features = [
                 f for f in self.features if not is_graph_feature(f)
@@ -120,7 +141,7 @@ class CatanatronEnv(gym.Env):
                 low=0, high=HIGH, shape=(len(self.features),), dtype=self.dtype
             )
 
-        self.reset()
+        self.reset(seed=self.initial_seed)
 
     def _rebuild_players(self):
         """Rebuild ``self.players`` from ``self.enemies`` with ``p0`` inserted at
@@ -158,7 +179,19 @@ class CatanatronEnv(gym.Env):
         valid = set(self.get_valid_actions())
         return [action_int in valid for action_int in range(self.action_space_size)]
 
+    def _with_local_random(self, callback, *args, **kwargs):
+        outer_state = random.getstate()
+        random.setstate(self._random_state)
+        try:
+            return callback(*args, **kwargs)
+        finally:
+            self._random_state = random.getstate()
+            random.setstate(outer_state)
+
     def step(self, action):
+        return self._with_local_random(self._step, action)
+
+    def _step(self, action):
         try:
             catan_action = from_action_space(
                 action, self.p0.color, self.player_colors, self.map_type
@@ -195,6 +228,15 @@ class CatanatronEnv(gym.Env):
         seed=None,
         options=None,
     ):
+        if seed is not None:
+            self._random_state = random.Random(seed).getstate()
+        return self._with_local_random(self._reset, seed=seed, options=options)
+
+    def _reset(
+        self,
+        seed=None,
+        options=None,
+    ):
         super().reset(seed=seed)
 
         if self.randomize_seats:
@@ -205,9 +247,6 @@ class CatanatronEnv(gym.Env):
             self._p0_seat_index = int(self.np_random.integers(0, len(self.enemies) + 1))
         self._rebuild_players()
 
-        if seed is not None:
-            # Ensure map generation uses the same seed as the game.
-            random.seed(seed)
         if self.colonist_1v1:
             number_placement = self.config.get(
                 "number_placement", COLONIST_1V1_SETTINGS.number_placement
@@ -243,7 +282,9 @@ class CatanatronEnv(gym.Env):
         return observation, info
 
     def _get_observation(self) -> Union[np.ndarray, MixedObservation]:
-        sample = create_sample(self.game, self.p0.color)
+        sample = create_sample(
+            self.game, self.p0.color, feature_profile=self.feature_profile
+        )
         if self.human_visible_obs and "P0_ACTUAL_VPS" in sample:
             from catanatron.state_functions import get_visible_victory_points
 
