@@ -72,8 +72,18 @@ python examples/colonist_1v1_backlog.py start 05-mcts-strength-sweep
 
 The command executes the fixed 10/25/50/100 ms, `F`/`AB:2`, two-seat, held-out-seed matrix
 and writes `runs/05-mcts-strength-sweep/mcts_strength_sweep.json`. It must include p95
-latency and every required cell. The cheaper command below is useful for profiling but is
-explicitly insufficient for the evidence gate:
+latency and every required cell. The report is atomically updated after each completed cell;
+re-running the same command resumes compatible partial evidence and refuses a different
+commit or protocol. Monitor completed cells, elapsed time, ETA, and the active cell with:
+
+```bash
+watch -n 5 python examples/colonist_1v1_search_benchmark.py \
+  --report runs/05-mcts-strength-sweep/mcts_strength_sweep.json \
+  --status
+```
+
+The cheaper command below is useful for profiling but is explicitly insufficient for the
+evidence gate:
 
 ```bash
 python examples/colonist_1v1_search_benchmark.py \
