@@ -70,7 +70,7 @@ EXPERIMENTS: tuple[Experiment, ...] = (
         id="00-gpu-smoke",
         stage="Validate",
         title="CUDA + dashboard smoke test",
-        hypothesis="The UCL host can train, checkpoint, evaluate and feed the TUI.",
+        hypothesis="The GPU host can train, checkpoint, evaluate and feed the TUI.",
         gpu_hours=(0.1, 0.3),
         storage_gib=0.15,
         env=(("TRAIN_PRESET", "smoke"), ("SEED", "7"), ("SKIP_FINAL_EVAL", "1")),
@@ -1039,7 +1039,7 @@ def write_launch_evidence(
 def launch_argv(experiment: Experiment) -> tuple[str, ...]:
     if experiment.command:
         return experiment.command
-    return ("bash", "scripts/ucl_cs/start_run.sh")
+    return ("bash", "scripts/gpu/start_run.sh")
 
 
 def launch_command(

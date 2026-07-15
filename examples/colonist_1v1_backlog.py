@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""List, inspect, compare and launch the gated UCL GPU experiment backlog."""
+"""List, inspect, compare and launch the gated GPU experiment backlog."""
 
 from __future__ import annotations
 

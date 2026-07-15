@@ -159,5 +159,3 @@ accounting, or no progress events for 15 minutes. Never promote from a developme
 | [GPU_EXPERIMENT_BACKLOG.md](GPU_EXPERIMENT_BACKLOG.md) | Generated queue, commands, resources, gates, and stop rules |
 | [TRAINING.md](TRAINING.md) | Data, BC, distillation, PPO, evaluation, and artifact reference |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Runtime boundaries and evidence flow |
-| [UCL_CS_GPUS.md](UCL_CS_GPUS.md) | Interactive UCL CS GPU-host workflow |
-| [UCL_MYRIAD.md](UCL_MYRIAD.md) | Scheduled Myriad workflow |

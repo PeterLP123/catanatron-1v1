@@ -331,6 +331,13 @@ python examples/colonist_1v1_tui.py --run-dir runs/my_bot
 python examples/colonist_1v1_tui.py --run-dir runs/my_bot --once
 ```
 
+For a portable NVIDIA CUDA setup and a monitored `tmux` session:
+
+```bash
+bash scripts/gpu/setup_env.sh
+TRAIN_PRESET=smoke bash scripts/gpu/start_run.sh
+```
+
 Before GPU access:
 
 ```bash

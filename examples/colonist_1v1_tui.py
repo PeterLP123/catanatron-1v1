@@ -308,7 +308,7 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
                     yield DataTable(id="ranking-table")
                 with TabPane("Backlog", id="backlog"):
                     yield Static(
-                        "Dependency-aware UCL GPU experiment queue.", classes="hero"
+                        "Dependency-aware GPU experiment queue.", classes="hero"
                     )
                     yield DataTable(id="backlog-table")
                 with TabPane("Evaluate", id="evaluate"):

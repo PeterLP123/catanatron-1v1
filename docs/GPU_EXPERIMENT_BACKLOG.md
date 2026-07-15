@@ -1,6 +1,6 @@
 # GPU experiment backlog
 
-This is the executable, evidence-gated queue for the UCL GPU workflow. No queue experiment
+This is the executable, evidence-gated queue for the portable GPU workflow. No queue experiment
 has completed as of 2026-07-12. Historical evaluation numbers are provisional, so complete
 the corrected legacy rebaseline in [RESULTS_LOG.md](RESULTS_LOG.md) before interpreting a
 new training result.

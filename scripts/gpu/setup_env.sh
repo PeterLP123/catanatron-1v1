@@ -15,13 +15,9 @@ if [[ -z "$PYTHON" ]]; then
   done
 fi
 
-if [[ -z "$PYTHON" && -d /opt/Python ]]; then
-  PYTHON=$(find /opt/Python -path '*/bin/python3.11' -perm -u+x 2>/dev/null | sort -V | tail -1)
-fi
-
 if [[ -z "$PYTHON" ]]; then
   echo "Python 3.11 or newer was not found." >&2
-  echo "Inspect /opt/Python on the CS host or ask TSG which Python 3.11 setup is supported." >&2
+  echo "Set PYTHON to a compatible interpreter and run this script again." >&2
   exit 2
 fi
 

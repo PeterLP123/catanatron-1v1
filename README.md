@@ -75,7 +75,10 @@ python examples/colonist_1v1_evaluate.py \
 
 See [the training guide](docs/TRAINING.md) for feature profiles, BC objectives, distillation, PPO settings, evidence suites, artifacts, and troubleshooting. Historical model numbers recorded before the 2026-07-12 evaluation-accounting fix are provisional; see [the results log](docs/RESULTS_LOG.md) before comparing checkpoints.
 
-UCL users can run the project on [Computer Science RTX GPU hosts](docs/UCL_CS_GPUS.md) or on [Myriad's scheduled V100/A100 nodes](docs/UCL_MYRIAD.md). Both guides include supplied setup and job templates. The [gated GPU experiment backlog](docs/GPU_EXPERIMENT_BACKLOG.md) provides matched runs, resource estimates and promotion rules.
+For NVIDIA CUDA runs, the portable wrappers under `scripts/gpu/` set up the environment,
+check the device, and launch training with a dashboard in `tmux`. The
+[gated GPU experiment backlog](docs/GPU_EXPERIMENT_BACKLOG.md) provides matched runs,
+resource estimates, and promotion rules.
 
 ## Rules preset
 

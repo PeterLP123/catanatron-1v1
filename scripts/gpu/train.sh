@@ -5,7 +5,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 VENV=${VENV:-"$HOME/.venvs/catanatron-1v1"}
 GPU_ID=${GPU_ID:-${CUDA_VISIBLE_DEVICES:-0}}
 TRAIN_PRESET=${TRAIN_PRESET:-standard}
-RUN_NAME=${RUN_NAME:-"ucl_cs_${TRAIN_PRESET}_$(date +%Y%m%d_%H%M%S)"}
+RUN_NAME=${RUN_NAME:-"gpu_${TRAIN_PRESET}_$(date +%Y%m%d_%H%M%S)"}
 RUN_DIR=${RUN_DIR:-"$ROOT/runs/$RUN_NAME"}
 RESUME_CHECKPOINT=${RESUME_CHECKPOINT:-}
 BC_CHECKPOINT=${BC_CHECKPOINT:-}
@@ -44,12 +44,12 @@ VF_COEF=${VF_COEF:-}
 MAX_GRAD_NORM=${MAX_GRAD_NORM:-}
 
 [[ -f "$VENV/bin/activate" ]] || {
-  echo "Missing environment: $VENV. Run scripts/ucl_cs/setup_env.sh first." >&2
+  echo "Missing environment: $VENV. Run scripts/gpu/setup_env.sh first." >&2
   exit 2
 }
 
 command -v nvidia-smi >/dev/null 2>&1 || {
-  echo "nvidia-smi is unavailable; run this on a CS GPU host." >&2
+  echo "nvidia-smi is unavailable; run this on an NVIDIA GPU host." >&2
   exit 2
 }
 
@@ -68,7 +68,7 @@ export CUDA_VISIBLE_DEVICES="$GPU_ID"
 export PYTHONUNBUFFERED=1
 
 mkdir -p "$RUN_DIR"
-TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/catanatron-ucl.XXXXXX")
+TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/catanatron-gpu.XXXXXX")
 trap 'echo "Temporary launch logs retained at: $TEMP_DIR" >&2' EXIT
 git -C "$ROOT" rev-parse HEAD > "$TEMP_DIR/git_commit.txt"
 nvidia-smi > "$TEMP_DIR/nvidia_smi_start.txt"

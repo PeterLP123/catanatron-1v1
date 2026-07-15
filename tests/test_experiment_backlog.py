@@ -235,6 +235,7 @@ def test_launch_command_contains_reproducible_profile():
     assert "SEED=101" in command
     assert "VISIBLE_VP_REWARD=1" in command
     assert "RUN_NAME=11-balanced-visible-s101" in command
+    assert "scripts/gpu/start_run.sh" in command
 
     search = launch_command(experiments_by_id()["05-mcts-strength-sweep"])
     assert "--budgets 10,25,50,100" in search
