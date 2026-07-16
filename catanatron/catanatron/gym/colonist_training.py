@@ -447,6 +447,7 @@ class BcCheckpointMeta:
     val_loss: Optional[float] = None
     loss_name: str = "cross_entropy"
     listwise_temperature: Optional[float] = None
+    hybrid_listwise_weight: Optional[float] = None
     seed: int = 0
     device: str = "cpu"
     best_epoch: Optional[int] = None

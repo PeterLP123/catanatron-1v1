@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 import json
 
@@ -17,7 +18,7 @@ from catanatron.gym.bc_training import (
 )
 from catanatron.gym.colonist_training import warmstart_bc_into_maskable_ppo
 from catanatron.gym.model_schema import build_model_schema, write_model_schema
-from examples.colonist_1v1_bc import _resolve_dataset_paths
+from examples.colonist_1v1_bc import _batch_loss, _resolve_dataset_paths
 
 
 def test_legal_masked_cross_entropy_ignores_illegal_logits():
@@ -95,6 +96,36 @@ def test_listwise_loss_normalizes_value_scale_and_preserves_ties():
         tied_mask,
     )
     assert equal_loss < skewed_loss
+
+
+def test_hybrid_loss_adds_weighted_listwise_regularizer():
+    legal, legal_mask, values, value_mask = padded_decision_columns(
+        [[0, 1]], [[0.0, 1.0]]
+    )
+    batch = {
+        "features": torch.tensor([[2.0, 0.0]]),
+        "targets": torch.tensor([0]),
+        "legal_indices": legal,
+        "legal_mask": legal_mask,
+        "candidate_values": values,
+        "candidate_mask": value_mask,
+        "sample_weights": torch.ones(1),
+    }
+    net = torch.nn.Identity()
+    args = SimpleNamespace(
+        listwise_temperature=0.05,
+        tie_tolerance=1e-6,
+        hybrid_listwise_weight=0.0,
+    )
+
+    legal_loss, _, legal_rows = _batch_loss(net, batch, "legal_ce", "cpu", args)
+    zero_weight_loss, _, hybrid_rows = _batch_loss(net, batch, "hybrid", "cpu", args)
+    assert legal_rows == hybrid_rows == 1
+    assert torch.allclose(legal_loss, zero_weight_loss)
+
+    args.hybrid_listwise_weight = 0.1
+    hybrid_loss, _, _ = _batch_loss(net, batch, "hybrid", "cpu", args)
+    assert hybrid_loss > legal_loss
 
 
 def test_parquet_batches_split_whole_games_and_stream_batches(tmp_path):

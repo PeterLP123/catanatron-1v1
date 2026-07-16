@@ -49,6 +49,21 @@ def test_bc_default_checkpoint_stays_out_of_repo_root():
     assert args.out == Path("runs/colonist_bc_policy.pt")
 
 
+def test_bc_parser_exposes_hybrid_objective():
+    args = build_parser().parse_args(
+        [
+            "--data-dir",
+            "data/c1",
+            "--loss",
+            "hybrid",
+            "--hybrid-listwise-weight",
+            "0.03",
+        ]
+    )
+    assert args.loss == "hybrid"
+    assert args.hybrid_listwise_weight == pytest.approx(0.03)
+
+
 def _play_summary(seed):
     wins, vps, games = play_batch(
         8,

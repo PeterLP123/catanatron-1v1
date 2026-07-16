@@ -123,11 +123,29 @@ python examples/colonist_1v1_bc.py \
   --out runs/bc-listwise/bc.pt --run-dir runs/bc-listwise
 ```
 
+### Hybrid imitation and ranking treatment
+
+Use legal-masked imitation as the primary objective while adding candidate-value
+ranking as a regularizer. A weight of zero is exactly legal-CE; sweep small positive
+weights on the same locked split before using a checkpoint for PPO.
+
+```bash
+python examples/colonist_1v1_bc.py \
+  --data-dir data/c1_ff_scored \
+  --loss hybrid --hybrid-listwise-weight 0.03 \
+  --listwise-temperature 0.02 --epochs 10 \
+  --val-fraction 0.1 --test-fraction 0.1 \
+  --split-seed 101 --seed 101 --device auto \
+  --feature-profile raw \
+  --out runs/bc-hybrid/bc.pt --run-dir runs/bc-hybrid
+```
+
 | Loss | Behavior | Data requirement |
 |---|---|---|
 | `cross_entropy` | Legacy CE over all 332 actions | Legacy or v2 data; compatibility only |
 | `legal_ce` | Masks logits to the recorded legal set before CE | `LEGAL_ACTIONS` |
 | `listwise` | Matches a temperature-scaled distribution over candidate values, with tie handling | `LEGAL_ACTIONS` and `CANDIDATE_VALUES` |
+| `hybrid` | Legal-CE plus `--hybrid-listwise-weight` times the listwise loss | `LEGAL_ACTIONS` and `CANDIDATE_VALUES` |
 | `auto` | Uses `legal_ce` for v2 data, otherwise legacy CE | Any supported dataset |
 
 `--device auto` selects CUDA, then MPS, then CPU. Python, NumPy, and Torch receive the same

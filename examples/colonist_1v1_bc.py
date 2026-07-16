@@ -96,15 +96,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--loss",
-        choices=("auto", "cross_entropy", "legal_ce", "listwise"),
+        choices=("auto", "cross_entropy", "legal_ce", "listwise", "hybrid"),
         default="auto",
-        help="auto selects legal_ce for dataset-v2 logs and cross_entropy for legacy logs.",
+        help=(
+            "auto selects legal_ce for dataset-v2 logs and cross_entropy for legacy "
+            "logs; hybrid uses legal_ce plus a weighted listwise regularizer."
+        ),
     )
     parser.add_argument(
         "--listwise-temperature",
         type=float,
         default=0.25,
-        help="Soft-target temperature for --loss listwise.",
+        help="Soft-target temperature for --loss listwise or hybrid.",
+    )
+    parser.add_argument(
+        "--hybrid-listwise-weight",
+        type=float,
+        default=0.1,
+        help="Listwise regularizer weight for --loss hybrid (default: 0.1).",
     )
     parser.add_argument(
         "--tie-tolerance",
@@ -210,15 +219,32 @@ def _batch_loss(net, batch, loss_name: str, device, args):
 
     legal_indices = batch["legal_indices"].to(device, non_blocking=True)
     legal_mask = batch["legal_mask"].to(device, non_blocking=True)
-    if loss_name == "legal_ce":
-        row_losses = legal_masked_cross_entropy(
+    if loss_name in {"legal_ce", "hybrid"}:
+        legal_row_losses = legal_masked_cross_entropy(
             logits,
             targets,
             legal_indices,
             legal_mask,
             reduction="none",
         )
-        return _weighted_mean(row_losses, weights), logits, len(targets)
+        if loss_name == "legal_ce":
+            return _weighted_mean(legal_row_losses, weights), logits, len(targets)
+
+        values = batch["candidate_values"].to(device, non_blocking=True)
+        value_mask = batch["candidate_mask"].to(device, non_blocking=True)
+        listwise_row_losses, valid = candidate_listwise_loss(
+            logits,
+            legal_indices,
+            legal_mask,
+            values,
+            value_mask,
+            temperature=args.listwise_temperature,
+            tie_tolerance=args.tie_tolerance,
+            reduction="none",
+        )
+        combined_row_losses = legal_row_losses.clone()
+        combined_row_losses[valid] += args.hybrid_listwise_weight * listwise_row_losses
+        return _weighted_mean(combined_row_losses, weights), logits, len(targets)
 
     values = batch["candidate_values"].to(device, non_blocking=True)
     value_mask = batch["candidate_mask"].to(device, non_blocking=True)
@@ -289,6 +315,8 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     if args.epochs <= 0:
         raise ValueError("epochs must be positive")
+    if args.hybrid_listwise_weight < 0:
+        raise ValueError("hybrid_listwise_weight must be non-negative")
     seed = args.split_seed if args.seed is None else args.seed
     seed_everything(seed)
 
@@ -335,14 +363,14 @@ def main(argv: list[str] | None = None) -> None:
     loss_name = args.loss
     if loss_name == "auto":
         loss_name = "legal_ce" if has_legal else "cross_entropy"
-    if loss_name in {"legal_ce", "listwise"} and not has_legal:
+    if loss_name in {"legal_ce", "listwise", "hybrid"} and not has_legal:
         raise ValueError(
             f"--loss {loss_name} requires dataset-v2 {LEGAL_ACTIONS_COLUMN}; "
             "regenerate teacher data or use --loss cross_entropy for legacy logs"
         )
-    if loss_name == "listwise" and not has_candidates:
+    if loss_name in {"listwise", "hybrid"} and not has_candidates:
         raise ValueError(
-            f"--loss listwise requires scored {CANDIDATE_VALUES_COLUMN} rows"
+            f"--loss {loss_name} requires scored {CANDIDATE_VALUES_COLUMN} rows"
         )
 
     schema_features = tuple(
@@ -523,7 +551,10 @@ def main(argv: list[str] | None = None) -> None:
         val_loss=best_val_loss,
         loss_name=loss_name,
         listwise_temperature=(
-            args.listwise_temperature if loss_name == "listwise" else None
+            args.listwise_temperature if loss_name in {"listwise", "hybrid"} else None
+        ),
+        hybrid_listwise_weight=(
+            args.hybrid_listwise_weight if loss_name == "hybrid" else None
         ),
         seed=seed,
         device=str(device),
