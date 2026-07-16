@@ -73,6 +73,23 @@ from catanatron.gym.wrappers.self_play import SelfPlayEnv
 from catanatron.players.weighted_random import WeightedRandomPlayer
 
 
+FRESH_RUN_EVIDENCE_FILES = frozenset({"experiment_evidence.json"})
+
+
+def _fresh_run_blockers(run_dir: Path) -> list[Path]:
+    """Return files that make ``run_dir`` unsafe for a fresh training run.
+
+    Evidence-gated backlog launches write ``experiment_evidence.json`` before
+    invoking the trainer. That audited input must survive startup, while every
+    other pre-existing file still blocks an accidental overwrite.
+    """
+    if not run_dir.exists():
+        return []
+    return [
+        path for path in run_dir.iterdir() if path.name not in FRESH_RUN_EVIDENCE_FILES
+    ]
+
+
 def mask_fn(env: gym.Env) -> np.ndarray:
     u = env.unwrapped
     valid = set(u.get_valid_actions())
@@ -711,7 +728,7 @@ def main(argv: list[str] | None = None) -> None:
         args.resume_checkpoint is not None
         and args.run_dir.resolve() in args.resume_checkpoint.resolve().parents
     )
-    existing_run_files = list(args.run_dir.iterdir()) if args.run_dir.exists() else []
+    existing_run_files = _fresh_run_blockers(args.run_dir)
     if existing_run_files and not same_run_resume:
         raise ValueError(
             f"Run directory {args.run_dir} is not empty. Use a new directory for a "

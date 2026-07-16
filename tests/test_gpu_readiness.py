@@ -28,7 +28,7 @@ from catanatron.gym.bc_training import hash_parquet_shards
 from catanatron.gym.tui_data import summarize_run
 from examples import colonist_1v1_generate_data
 from examples.colonist_1v1_bc import DEFAULT_BC_CHECKPOINT_PATH, build_parser
-from examples.colonist_1v1_train import make_colonist_env
+from examples.colonist_1v1_train import _fresh_run_blockers, make_colonist_env
 
 
 def _game_config(seed=0):
@@ -62,6 +62,18 @@ def test_bc_parser_exposes_hybrid_objective():
     )
     assert args.loss == "hybrid"
     assert args.hybrid_listwise_weight == pytest.approx(0.03)
+
+
+def test_fresh_training_allows_only_backlog_launch_evidence(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    evidence = run_dir / "experiment_evidence.json"
+    evidence.write_text("{}\n", encoding="utf-8")
+    assert _fresh_run_blockers(run_dir) == []
+
+    unrelated = run_dir / "checkpoint.zip"
+    unrelated.write_bytes(b"existing")
+    assert _fresh_run_blockers(run_dir) == [unrelated]
 
 
 def _play_summary(seed):
