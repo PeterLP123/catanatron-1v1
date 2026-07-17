@@ -92,6 +92,31 @@ Candidate scoring evaluates every legal action with the F leaf evaluator and is 
 | `--feature-profile` | `raw` or `public_derived` |
 | `--include-board-tensor` | Also store the experimental flattened board tensor |
 
+### Benchmark practical teachers against the opponent population
+
+Before using search labels, compare deterministic teacher candidates on the same two-seat
+seed schedule. The default matrix covers `AB:2` plus fixed-simulation MCTS at 200, 800,
+and 2,000 simulations against the full `R,W,VP,F,G:25,M:200,AB:2` battery:
+
+```bash
+python examples/colonist_1v1_teacher_benchmark.py \
+  --num-games 4 --profile-samples 1 \
+  --report runs/teacher-population-screen/report.json
+```
+
+Each completed candidate/opponent cell is written atomically. Re-run with `--resume` to
+continue an interrupted matrix; its commit, candidates, opponents, seed, game count, and
+profiling configuration must match. Use `--max-cells` for a deliberately bounded stage.
+The report separates the common population (`R,W,VP,F,G:25`) from the harder search
+population and records decision p95 latency alongside complete-game accounting.
+
+On a long-lived worker, the portable wrappers provide a resumable launch and a live view:
+
+```bash
+scripts/gpu/run_teacher_benchmark.sh runs/teacher-population-screen
+watch -n 10 scripts/gpu/watch_teacher_benchmark.sh runs/teacher-population-screen
+```
+
 ## 2. Train baseline and decision-focused BC
 
 The BC loader streams selected Parquet shards through bounded batches instead of building
