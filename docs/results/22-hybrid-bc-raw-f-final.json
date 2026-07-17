@@ -1,0 +1,85 @@
+{
+  "agent": "T:/cs/student/project_msc/2025/cf/pprender/runs/catanatron-1v1/bc-hybrid-sweep/w0030/bc.pt",
+  "colonist_1v1": true,
+  "game_evidence": {
+    "rows": 50,
+    "sha256": "b97406f7e60fe70f044d2601f8dd58c57eda17315c6ecced56ad286e5806eee8"
+  },
+  "matchups": [
+    {
+      "agent_code": "T:/cs/student/project_msc/2025/cf/pprender/runs/catanatron-1v1/bc-hybrid-sweep/w0030/bc.pt",
+      "avg_agent_vp": 11.24,
+      "avg_opponent_vp": 13.74,
+      "avg_turns": 102.42,
+      "avg_vp_diff": -2.5,
+      "completed_games": 50,
+      "draws": 0,
+      "duration_seconds": 25.325436270002683,
+      "error_games": 0,
+      "games": 50,
+      "games_seat0": 25,
+      "games_seat1": 25,
+      "gate": 0.52,
+      "gate_mode": "lower_bound",
+      "gate_value": 0.14297252401872207,
+      "losses": 38,
+      "observed_games": 50,
+      "opponent": "F",
+      "passed_gate": false,
+      "requested_games": 50,
+      "truncated_games": 0,
+      "vp_diff_seat0": -1.0,
+      "vp_diff_seat1": -4.0,
+      "wilson_high": 0.3741294937519236,
+      "wilson_low": 0.14297252401872207,
+      "win_rate": 0.24,
+      "win_rate_seat0": 0.32,
+      "win_rate_seat1": 0.16,
+      "wins": 12
+    }
+  ],
+  "model": {
+    "agent_spec": "T:/cs/student/project_msc/2025/cf/pprender/runs/catanatron-1v1/bc-hybrid-sweep/w0030/bc.pt",
+    "checkpoint_label": "hybrid-bc-w0030",
+    "checkpoint_path": "/cs/student/project_msc/2025/cf/pprender/runs/catanatron-1v1/bc-hybrid-sweep/w0030/bc.pt",
+    "file_sha256": "886f5b374011e400a42b28c62dc0c3cd5de93b6175636efdcc651bcae4cdb464",
+    "training_timesteps": null
+  },
+  "protocol": {
+    "base_seed": 20260701,
+    "description": "",
+    "gate_mode": "lower_bound",
+    "gates": {
+      "F": 0.52
+    },
+    "name": "fast-single",
+    "num_games_per_matchup": 50,
+    "opponents": [
+      "F"
+    ],
+    "seed": 23260710,
+    "seed_suite": "final"
+  },
+  "result_sha256": "33798e3630dc590518cc1f2eeb0cd0efe06320f97c2445ec4787510bccc8273d",
+  "schema_version": "catanatron-result-1",
+  "source_report": {
+    "path": "runs/22-hybrid-bc-raw-f-final/raw_bc_vs_f.json",
+    "sha256": "59d87818ce1662732640c7acc130d01b2e72840e5e86a58012615a1897d8d031"
+  },
+  "status": "rejected",
+  "summary": {
+    "accounted_games": 50,
+    "all_games_accounted": true,
+    "best_win_rate": 0.24,
+    "completed_games": 50,
+    "error_games": 0,
+    "gates_passed_count": 0,
+    "gates_total": 1,
+    "mean_win_rate": 0.24,
+    "observed_games": 50,
+    "requested_games": 50,
+    "truncated_games": 0,
+    "weighted_score": 0.19148626200936103,
+    "worst_win_rate": 0.24
+  }
+}

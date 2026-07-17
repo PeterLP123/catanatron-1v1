@@ -9,9 +9,9 @@ This file separates historical observations from promotion-grade evidence.
 > **provisional historical estimates**, not current scorecards, promotion evidence,
 > or proof that any checkpoint is the best or most seat-balanced model.
 
-No corrected rebaseline or accepted compact result has been recorded yet. The next
-evidence action is to re-evaluate retained checkpoints with a final seed suite, both
-seats, lower-bound gates, complete per-game rows, and checkpoint hashes.
+Two corrected, rejected compact results are now recorded below. They establish a
+useful failure boundary: the hybrid-BC checkpoint has material raw strength against
+`F`, but the subsequent 500k PPO run removes it. Neither checkpoint is promotion-ready.
 
 ## Evidence standard for new entries
 
@@ -78,12 +78,13 @@ has been withdrawn because the reports do not support that ranking.
 
 The historical runs motivate tests but do not prove a root cause:
 
-- retained policies probably have a material gap against `F`, but the corrected size of
-  that gap is unknown;
-- legal-choice and candidate-value objectives may preserve close-action preferences better
-  than full-space imitation accuracy, but listwise BC has not yet been run and measured;
-- search-distillation may help if repaired MCTS is both strong and affordable, but the
-  required `05-mcts-strength-sweep` has not yet been run;
+- corrected final evidence confirms a material gap against `F`: experiment 20 finished
+  at 0/50 wins and -11.76 average VP difference;
+- the hybrid legal-CE plus listwise checkpoint reached 12/50 wins and -2.50 VP difference
+  against `F` before PPO, so PPO forgetting is now the primary tested hypothesis;
+- the completed `05-mcts-strength-sweep` found only a small search signal at 100 ms
+  (5-10% wins against `F`) with p95 latency around 283 ms, so `F` remains the stronger
+  available teacher for a DAgger pilot;
 - old per-seat differences cannot support any seat-balance conclusion;
 - full AlphaZero-style training is a gated fallback, not the established next solution.
 
@@ -92,11 +93,12 @@ The historical runs motivate tests but do not prove a root cause:
 | Date | Experiment | Checkpoint hash | Seed suite | Result | Artifact |
 |---|---|---|---|---|---|
 | - | Corrected historical rebaseline | - | `final` | Not run | - |
-| - | `05-mcts-strength-sweep` | N/A | Held-out search seeds | Not run | - |
+| 2026-07-15 | `05-mcts-strength-sweep` | N/A | Held-out search seeds | Complete diagnostic; 100 ms search reached 5-10% vs `F` | Run artifact only |
 | - | Legal-CE BC baseline | - | `promotion` / `final` | Not run | - |
 | - | Listwise BC treatment | - | `promotion` / `final` | Not run | - |
 | - | DAgger/search distillation | - | `promotion` / `final` | Not run | - |
-| - | GPU backlog experiments | - | `promotion` / `final` | None completed | - |
+| 2026-07-16 | `20-hard-bc-actual-s101` | `2f4ab72a895a` | `final` | Rejected; 0/4 gates, `F` 0%, weighted score 0.3315 | [`20-hard-bc-actual-s101.json`](results/20-hard-bc-actual-s101.json) |
+| 2026-07-17 | `22-hybrid-bc-raw-f-final` | `886f5b374011` | `final` | Rejected F gate; 24% wins, -2.50 VP difference | [`22-hybrid-bc-raw-f-final.json`](results/22-hybrid-bc-raw-f-final.json) |
 
 ## Record a corrected result
 
