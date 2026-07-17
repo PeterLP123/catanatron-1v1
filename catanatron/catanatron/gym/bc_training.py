@@ -35,7 +35,7 @@ NUM_LEGAL_COLUMN = "NUM_LEGAL"
 LEGAL_ACTIONS_COLUMN = "LEGAL_ACTIONS"
 CANDIDATE_VALUES_COLUMN = "CANDIDATE_VALUES"
 
-LossName = Literal["cross_entropy", "legal_ce", "listwise"]
+LossName = Literal["cross_entropy", "legal_ce", "listwise", "hybrid"]
 
 
 def hash_parquet_shards(
