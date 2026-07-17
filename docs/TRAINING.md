@@ -209,6 +209,24 @@ python examples/colonist_1v1_train.py \
   --feature-profile raw --tensorboard
 ```
 
+To limit catastrophic forgetting after a strong BC warm-start, freeze that actor as a
+legal-action reference and add forward KL to PPO's actor loss:
+
+```bash
+python examples/colonist_1v1_train.py \
+  --timesteps 50000 --n-envs 4 --run-dir runs/bc-anchored-ppo \
+  --bc-checkpoint runs/bc-listwise/bc.pt --bc-anchor-coef 0.03 \
+  --learning-rate 3e-5 --n-epochs 3 --clip-range 0.1 \
+  --eval-freq 10000 --eval-games 20 \
+  --retention-min-f-win-rate 0.10 --retention-require-weak-gates
+```
+
+The KL direction is `KL(frozen BC || current actor)` and is normalized over the legal
+actions in each sampled state. The critic remains unconstrained. The frozen reference is
+not stored in inference checkpoints; its path, SHA-256, coefficient, and direction are
+recorded in the run manifest. Retention gates use development point estimates and stop a
+diagnostic run early; they are not final promotion evidence.
+
 Named presets set runtime and evaluation cadence, then enable the mixed league:
 
 | Preset | Timesteps | Envs | Save every | Dev eval every | Dev games | Curriculum |
@@ -243,6 +261,9 @@ Other important options:
 | Option | Purpose |
 |---|---|
 | `--bc-checkpoint` | Strict schema-checked BC warm-start |
+| `--bc-anchor-coef` | Legal-action forward-KL weight against the frozen BC actor |
+| `--retention-min-f-win-rate` | Stop after a dev eval falls below this point F rate |
+| `--retention-require-weak-gates` | Stop after a dev eval misses R, W, or VP point gates |
 | `--resume-checkpoint` | Strict schema-checked PPO continuation |
 | `--promotion-eval-freq` | Run a locked lower-bound promotion suite during training |
 | `--final-eval-games` | Explicitly override final protocol count; omitted means use protocol count |

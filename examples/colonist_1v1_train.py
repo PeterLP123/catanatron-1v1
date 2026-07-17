@@ -43,6 +43,7 @@ from catanatron.colonist_1v1_eval import (
     append_model_registry,
     run_benchmark,
 )
+from catanatron.gym.anchored_ppo import AnchoredMaskablePPO
 from catanatron.gym.colonist_rewards import (
     colonist_shaped_reward,
     make_colonist_shaped_reward,
@@ -252,6 +253,8 @@ class ColonistTrainCallback(BaseCallback):
         model_schema: Optional[dict[str, Any]] = None,
         restore_selection_state: bool = False,
         allow_legacy_schema: bool = False,
+        retention_min_f_win_rate: Optional[float] = None,
+        retention_require_weak_gates: bool = False,
         verbose: int = 1,
     ):
         super().__init__(verbose)
@@ -271,6 +274,9 @@ class ColonistTrainCallback(BaseCallback):
         self.step_state = step_state
         self.model_schema = model_schema
         self.allow_legacy_schema = allow_legacy_schema
+        self.retention_min_f_win_rate = retention_min_f_win_rate
+        self.retention_require_weak_gates = retention_require_weak_gates
+        self.retention_stop_reason: Optional[dict[str, Any]] = None
         self.best_dev_weighted_score = -1.0
         self.best_dev_f_win_rate = -1.0
         self.best_promotion_weighted_score = -1.0
@@ -526,6 +532,48 @@ class ColonistTrainCallback(BaseCallback):
                         evidence="dev_only",
                         timesteps=int(self.num_timesteps),
                     )
+            win_rates = {
+                matchup.opponent: matchup.win_rate for matchup in report.matchups
+            }
+            failures = []
+            if (
+                self.retention_min_f_win_rate is not None
+                and win_rates.get("F", -1.0) < self.retention_min_f_win_rate
+            ):
+                failures.append(
+                    {
+                        "opponent": "F",
+                        "win_rate": win_rates.get("F"),
+                        "minimum": self.retention_min_f_win_rate,
+                    }
+                )
+            if self.retention_require_weak_gates:
+                for opponent in ("R", "W", "VP"):
+                    minimum = DEFAULT_BENCHMARK_GATES[opponent]
+                    if win_rates.get(opponent, -1.0) < minimum:
+                        failures.append(
+                            {
+                                "opponent": opponent,
+                                "win_rate": win_rates.get(opponent),
+                                "minimum": minimum,
+                            }
+                        )
+            if failures:
+                self.retention_stop_reason = {
+                    "timesteps": int(self.num_timesteps),
+                    "failures": failures,
+                }
+                if self.tracker:
+                    self.tracker.event(
+                        "retention_stop",
+                        **self.retention_stop_reason,
+                    )
+                if self.verbose:
+                    print(
+                        "[ColonistEval] stopping after retention gate failure: "
+                        f"{failures}"
+                    )
+                return False
         if promotion_due:
             report, _ = self._record_evaluation(
                 latest,
@@ -647,6 +695,23 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--vf-coef", type=float, default=0.5)
     p.add_argument("--max-grad-norm", type=float, default=0.5)
     p.add_argument(
+        "--bc-anchor-coef",
+        type=float,
+        default=0.0,
+        help="Forward-KL weight that retains the frozen BC actor over legal actions.",
+    )
+    p.add_argument(
+        "--retention-min-f-win-rate",
+        type=float,
+        default=None,
+        help="Stop after a dev eval whose point F win rate is below this value.",
+    )
+    p.add_argument(
+        "--retention-require-weak-gates",
+        action="store_true",
+        help="Stop after a dev eval that misses a point R, W, or VP gate.",
+    )
+    p.add_argument(
         "--visible-vp-reward",
         action="store_true",
         help="Use public VP for shaping instead of actual VP.",
@@ -724,6 +789,20 @@ def main(argv: list[str] | None = None) -> None:
         args.curriculum = preset.curriculum
         args.mixed_league = True
 
+    if args.bc_anchor_coef < 0:
+        p.error("--bc-anchor-coef must be non-negative")
+    if args.bc_anchor_coef > 0 and args.bc_checkpoint is None:
+        p.error("--bc-anchor-coef requires --bc-checkpoint")
+    if (
+        args.retention_min_f_win_rate is not None
+        and not 0 <= args.retention_min_f_win_rate <= 1
+    ):
+        p.error("--retention-min-f-win-rate must be between 0 and 1")
+    if (
+        args.retention_min_f_win_rate is not None or args.retention_require_weak_gates
+    ) and args.eval_freq <= 0:
+        p.error("retention gates require --eval-freq greater than zero")
+
     same_run_resume = bool(
         args.resume_checkpoint is not None
         and args.run_dir.resolve() in args.resume_checkpoint.resolve().parents
@@ -760,6 +839,11 @@ def main(argv: list[str] | None = None) -> None:
         "hidden": None,
         "feature_profile": args.feature_profile,
         "human_visible_obs": args.human_visible_obs,
+        "bc_anchor_coef": args.bc_anchor_coef,
+        "retention": {
+            "min_f_win_rate": args.retention_min_f_win_rate,
+            "require_weak_gates": args.retention_require_weak_gates,
+        },
         "ppo_requested": {
             "learning_rate": args.learning_rate,
             "gamma": args.gamma,
@@ -968,7 +1052,7 @@ def main(argv: list[str] | None = None) -> None:
         training_manifest["timesteps"] = int(model.num_timesteps) + args.timesteps
         tracker.update_manifest(training=training_manifest)
     else:
-        model = MaskablePPO(
+        model = AnchoredMaskablePPO(
             MaskableActorCriticPolicy,
             env,
             verbose=1,
@@ -984,6 +1068,7 @@ def main(argv: list[str] | None = None) -> None:
             clip_range=args.clip_range,
             vf_coef=args.vf_coef,
             max_grad_norm=args.max_grad_norm,
+            bc_anchor_coef=args.bc_anchor_coef,
             tensorboard_log=str(args.run_dir / "tb") if args.tensorboard else None,
         )
     model.catanatron_model_schema = model_schema
@@ -1020,6 +1105,20 @@ def main(argv: list[str] | None = None) -> None:
         if meta:
             print(f"  BC meta: val_accuracy={meta.val_accuracy}")
             tracker.update_manifest(bc_meta=meta.__dict__)
+        if args.bc_anchor_coef > 0:
+            if not isinstance(model, AnchoredMaskablePPO):
+                raise RuntimeError("BC anchoring is unavailable for resumed models")
+            model.set_anchor_from_current_policy()
+            tracker.update_manifest(
+                bc_anchor={
+                    "coefficient": args.bc_anchor_coef,
+                    "direction": "forward_kl_reference_to_current",
+                    "legal_actions_only": True,
+                    "actor_only": True,
+                    "reference_checkpoint": str(args.bc_checkpoint),
+                    "reference_sha256": sha256_file(args.bc_checkpoint),
+                }
+            )
 
     callbacks: list[BaseCallback] = []
     ckpt_dir = args.run_dir / "checkpoints"
@@ -1059,6 +1158,8 @@ def main(argv: list[str] | None = None) -> None:
         model_schema=model_schema,
         restore_selection_state=same_run_resume,
         allow_legacy_schema=args.allow_legacy_schema,
+        retention_min_f_win_rate=args.retention_min_f_win_rate,
+        retention_require_weak_gates=args.retention_require_weak_gates,
     )
     callbacks.append(train_callback)
 
@@ -1068,6 +1169,9 @@ def main(argv: list[str] | None = None) -> None:
         callback=callbacks,
         reset_num_timesteps=args.resume_checkpoint is None,
     )
+    if train_callback.retention_stop_reason is not None:
+        training_manifest["retention_stop"] = train_callback.retention_stop_reason
+        tracker.update_manifest(training=training_manifest)
     step_state["timesteps"] = int(model.num_timesteps)
     final_path, last_path, final_source, final_timesteps = materialize_final_candidate(
         model,

@@ -5,7 +5,7 @@ import json
 import pytest
 from unittest.mock import patch
 
-from catanatron.colonist_1v1_eval import EvaluationReport
+from catanatron.colonist_1v1_eval import EvaluationReport, MatchupResult
 from examples.colonist_1v1_train import ColonistTrainCallback
 from examples.colonist_1v1_train import materialize_final_candidate
 from examples.colonist_1v1_train import main as train_main
@@ -36,6 +36,32 @@ def _report(*, passed: bool = False, score: float = 0.25):
     )
 
 
+def _retention_report(win_rates: dict[str, float]):
+    matchups = [
+        MatchupResult(
+            opponent=opponent,
+            agent_code="L:test.zip",
+            games=10,
+            wins=round(rate * 10),
+            losses=10 - round(rate * 10),
+            draws=0,
+            win_rate=rate,
+            wilson_low=0.0,
+            wilson_high=1.0,
+            avg_agent_vp=0.0,
+            avg_opponent_vp=0.0,
+            avg_vp_diff=0.0,
+            avg_turns=0.0,
+        )
+        for opponent, rate in win_rates.items()
+    ]
+    return EvaluationReport(
+        agent="L:test.zip",
+        matchups=matchups,
+        summary={"weighted_score": 0.5, "all_games_accounted": True},
+    )
+
+
 def test_eval_frequency_is_independent_of_checkpoint_frequency(tmp_path):
     checkpoint = tmp_path / "checkpoints" / "ppo_colonist_6_steps.zip"
     checkpoint.parent.mkdir()
@@ -63,6 +89,61 @@ def test_eval_frequency_is_independent_of_checkpoint_frequency(tmp_path):
     assert run.call_args.kwargs["eval_kind"] == "dev"
     assert run.call_args.kwargs["gate_mode"] == "point"
     assert (tmp_path / "eval_reports" / "dev_step_6.json").exists()
+
+
+def test_dev_eval_stops_training_when_f_retention_is_lost(tmp_path):
+    checkpoint = tmp_path / "checkpoints" / "ppo_colonist_10_steps.zip"
+    checkpoint.parent.mkdir()
+    checkpoint.write_bytes(b"model")
+    callback = ColonistTrainCallback(
+        _League(tmp_path),
+        checkpoint.parent,
+        save_freq=100,
+        eval_freq=10,
+        report_dir=tmp_path / "eval_reports",
+        retention_min_f_win_rate=0.1,
+        retention_require_weak_gates=True,
+    )
+    callback.n_calls = 10
+    callback.num_timesteps = 10
+    report = _retention_report({"R": 1.0, "W": 0.8, "VP": 0.7, "F": 0.0})
+
+    with (
+        patch.object(callback, "_current_checkpoint", return_value=checkpoint),
+        patch("examples.colonist_1v1_train.run_benchmark", return_value=report),
+    ):
+        assert not callback._on_step()
+
+    assert callback.retention_stop_reason == {
+        "timesteps": 10,
+        "failures": [{"opponent": "F", "win_rate": 0.0, "minimum": 0.1}],
+    }
+
+
+def test_dev_eval_continues_when_all_retention_gates_pass(tmp_path):
+    checkpoint = tmp_path / "checkpoints" / "ppo_colonist_10_steps.zip"
+    checkpoint.parent.mkdir()
+    checkpoint.write_bytes(b"model")
+    callback = ColonistTrainCallback(
+        _League(tmp_path),
+        checkpoint.parent,
+        save_freq=100,
+        eval_freq=10,
+        report_dir=tmp_path / "eval_reports",
+        retention_min_f_win_rate=0.1,
+        retention_require_weak_gates=True,
+    )
+    callback.n_calls = 10
+    callback.num_timesteps = 10
+    report = _retention_report({"R": 1.0, "W": 0.8, "VP": 0.7, "F": 0.2})
+
+    with (
+        patch.object(callback, "_current_checkpoint", return_value=checkpoint),
+        patch("examples.colonist_1v1_train.run_benchmark", return_value=report),
+    ):
+        assert callback._on_step()
+
+    assert callback.retention_stop_reason is None
 
 
 def test_locked_promotion_uses_lower_bound_gates(tmp_path):
@@ -292,3 +373,13 @@ def test_resume_and_bc_warmstart_are_mutually_exclusive():
                 "bc.pt",
             ]
         )
+
+
+def test_bc_anchor_requires_bc_checkpoint():
+    with pytest.raises(SystemExit):
+        train_main(["--bc-anchor-coef", "0.1"])
+
+
+def test_retention_gate_requires_development_evaluation():
+    with pytest.raises(SystemExit):
+        train_main(["--retention-min-f-win-rate", "0.1"])
