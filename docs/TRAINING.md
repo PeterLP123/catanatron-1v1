@@ -227,6 +227,11 @@ not stored in inference checkpoints; its path, SHA-256, coefficient, and directi
 recorded in the run manifest. Retention gates use development point estimates and stop a
 diagnostic run early; they are not final promotion evidence.
 
+For a reproducible coefficient diagnostic, `scripts/gpu/run_bc_anchor_sweep.sh`
+runs `0`, `0.01`, `0.03`, and `0.10` sequentially. Point a second terminal or a
+`tmux` window at `scripts/gpu/watch_bc_anchor_sweep.sh <output-root>`; wrapping it
+with `watch -n 10` provides a refreshing GPU, candidate, event, and log view.
+
 Named presets set runtime and evaluation cadence, then enable the mixed league:
 
 | Preset | Timesteps | Envs | Save every | Dev eval every | Dev games | Curriculum |
