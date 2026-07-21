@@ -11,13 +11,16 @@ from catanatron.gym.bc_training import (
     DecisionMetricAccumulator,
     ParquetDecisionBatches,
     candidate_listwise_loss,
+    combine_parquet_dataset_plans,
     hash_parquet_shards,
     inspect_parquet_dataset,
     legal_masked_cross_entropy,
     padded_decision_columns,
 )
 from catanatron.gym.colonist_training import warmstart_bc_into_maskable_ppo
+from catanatron.gym.distillation import DistillationDatasetWriter
 from catanatron.gym.model_schema import build_model_schema, write_model_schema
+from catanatron.models.player import Color
 from examples.colonist_1v1_bc import _batch_loss, _resolve_dataset_paths
 
 
@@ -162,6 +165,152 @@ def test_parquet_batches_split_whole_games_and_stream_batches(tmp_path):
     assert len(batches) == 4
     assert all(batch["features"].shape == (1, 2) for batch in batches)
     assert all(batch["has_decision_metadata"] for batch in batches)
+
+
+def test_parquet_batches_accept_and_mix_distillation_teacher_targets(tmp_path):
+    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pyarrow")
+
+    teacher = tmp_path / "teacher.parquet"
+    distillation = tmp_path / "distillation.parquet"
+    common = {
+        "F_A": [1.0],
+        "F_B": [2.0],
+        "NUM_LEGAL": [2],
+        "LEGAL_ACTIONS": [[0, 1]],
+    }
+    pd.DataFrame(
+        {
+            **common,
+            "GAME_ID": ["teacher-game"],
+            "ACTION": [0],
+            "CANDIDATE_VALUES": [[0.8, 0.2]],
+        }
+    ).to_parquet(teacher)
+    pd.DataFrame(
+        {
+            **common,
+            "GAME_ID": ["student-visited-game"],
+            "TEACHER_ACTION": [1],
+            "CANDIDATE_SCORES": [[0.1, 0.9]],
+        }
+    ).to_parquet(distillation)
+
+    plan = inspect_parquet_dataset(
+        [teacher, distillation], val_fraction=0.0, test_fraction=0.0, seed=7
+    )
+    assert plan.path_target_columns[teacher] == "ACTION"
+    assert plan.path_target_columns[distillation] == "TEACHER_ACTION"
+    assert "CANDIDATE_VALUES" in plan.available_columns
+
+    batches = list(ParquetDecisionBatches(plan, "train", batch_size=1).loader())
+    assert {int(batch["targets"].item()) for batch in batches} == {0, 1}
+    assert all(bool(batch["candidate_mask"].all()) for batch in batches)
+
+
+def test_augmentation_plan_preserves_frozen_base_split(tmp_path):
+    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pyarrow")
+
+    def write_games(directory, prefix, *, target_column):
+        directory.mkdir()
+        paths = []
+        for index in range(5):
+            path = directory / f"{prefix}-{index}.parquet"
+            pd.DataFrame(
+                {
+                    "F_A": [float(index)],
+                    target_column: [index % 2],
+                    "GAME_ID": [f"{prefix}-game-{index}"],
+                    "NUM_LEGAL": [2],
+                    "LEGAL_ACTIONS": [[0, 1]],
+                }
+            ).to_parquet(path)
+            paths.append(path)
+        return paths
+
+    base_paths = write_games(tmp_path / "base", "base", target_column="ACTION")
+    augmentation_paths = write_games(
+        tmp_path / "augmentation", "dagger", target_column="TEACHER_ACTION"
+    )
+    base = inspect_parquet_dataset(
+        base_paths, val_fraction=0.2, test_fraction=0.2, seed=101
+    )
+    augmentation = inspect_parquet_dataset(
+        augmentation_paths, val_fraction=0.2, test_fraction=0.2, seed=101
+    )
+    combined = combine_parquet_dataset_plans((base, augmentation))
+
+    assert combined.train_groups & set(base.rows_by_group) == base.train_groups
+    assert combined.val_groups & set(base.rows_by_group) == base.val_groups
+    assert combined.test_groups & set(base.rows_by_group) == base.test_groups
+    assert len(combined.paths) == 10
+
+
+def test_training_path_weight_applies_only_to_selected_shard(tmp_path):
+    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pyarrow")
+    paths = []
+    for index in range(2):
+        path = tmp_path / f"game-{index}.parquet"
+        pd.DataFrame(
+            {
+                "F_A": [float(index)],
+                "ACTION": [index],
+                "GAME_ID": [f"game-{index}"],
+            }
+        ).to_parquet(path)
+        paths.append(path)
+    plan = inspect_parquet_dataset(paths, val_fraction=0.0, test_fraction=0.0, seed=1)
+    batches = list(
+        ParquetDecisionBatches(
+            plan,
+            "train",
+            batch_size=1,
+            path_weights={paths[1]: 4.0},
+        ).loader()
+    )
+    weights_by_target = {
+        int(batch["targets"].item()): float(batch["sample_weights"].item())
+        for batch in batches
+    }
+    assert weights_by_target == {0: 1.0, 1: 4.0}
+
+
+def test_non_finite_distillation_scores_are_not_listwise_targets():
+    legal, legal_mask, values, value_mask = padded_decision_columns(
+        [[0, 1]], [[float("nan"), float("nan")]]
+    )
+    assert legal.tolist() == [[0, 1]]
+    assert legal_mask.tolist() == [[True, True]]
+    assert values.tolist() == [[0.0, 0.0]]
+    assert value_mask.tolist() == [[False, False]]
+
+
+def test_bc_resolver_accepts_verified_distillation_manifest(tmp_path):
+    pytest.importorskip("pandas")
+    pytest.importorskip("pyarrow")
+    schema = build_model_schema()
+    root = tmp_path / "distillation"
+    writer = DistillationDatasetWriter(
+        root,
+        iteration=0,
+        shard_games=1,
+        metadata={"schema": schema},
+    )
+    writer.add_game(
+        [{"F_A": 1.0, "TEACHER_ACTION": 0}],
+        game_index=0,
+        game_seed=10,
+        student_color=Color.BLUE,
+        winner=Color.BLUE,
+        truncated=False,
+    )
+    writer.finalize()
+
+    paths = _resolve_dataset_paths([root], expected_schema=schema)
+    assert len(paths) == 1
+    assert paths[0].name == "shard-00000.parquet"
 
 
 def test_small_dataset_allocates_validation_or_requires_explicit_opt_out(tmp_path):

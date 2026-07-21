@@ -11,8 +11,9 @@ from __future__ import annotations
 import random
 import hashlib
 import json
+import math
 from collections import Counter
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -34,6 +35,8 @@ GAME_ID_COLUMN = "GAME_ID"
 NUM_LEGAL_COLUMN = "NUM_LEGAL"
 LEGAL_ACTIONS_COLUMN = "LEGAL_ACTIONS"
 CANDIDATE_VALUES_COLUMN = "CANDIDATE_VALUES"
+DISTILLATION_TARGET_COLUMN = "TEACHER_ACTION"
+DISTILLATION_CANDIDATE_VALUES_COLUMN = "CANDIDATE_SCORES"
 
 LossName = Literal["cross_entropy", "legal_ce", "listwise", "hybrid"]
 
@@ -256,8 +259,12 @@ def padded_decision_columns(
                 f"{len(candidates)} != {len(actions)}"
             )
         if candidates:
-            values[row, : len(candidates)] = torch.as_tensor(candidates)
-            value_mask[row, : len(candidates)] = True
+            candidate_tensor = torch.as_tensor(candidates, dtype=torch.float32)
+            finite = torch.isfinite(candidate_tensor)
+            values[row, : len(candidates)] = torch.where(
+                finite, candidate_tensor, torch.zeros_like(candidate_tensor)
+            )
+            value_mask[row, : len(candidates)] = finite
     return legal_indices, legal_mask, values, value_mask
 
 
@@ -274,6 +281,8 @@ class ParquetDatasetPlan:
     test_groups: frozenset[str]
     rows_by_group: dict[str, int]
     path_groups: dict[Path, frozenset[str]]
+    path_target_columns: dict[Path, str]
+    path_candidate_value_columns: dict[Path, str]
 
     def groups_for(self, split: str) -> frozenset[str]:
         if split == "train":
@@ -286,6 +295,70 @@ class ParquetDatasetPlan:
 
     def rows_for(self, split: str) -> int:
         return sum(self.rows_by_group.get(group, 0) for group in self.groups_for(split))
+
+
+def combine_parquet_dataset_plans(
+    plans: Sequence[ParquetDatasetPlan],
+) -> ParquetDatasetPlan:
+    """Combine independently split corpora without reshuffling earlier games.
+
+    DAgger adds new student-visited games over time. Splitting the entire aggregate
+    again would move frozen base games between train/validation/test whenever an
+    iteration is appended. Inspecting each corpus independently and then combining
+    their plans preserves the base split while giving each augmentation its own
+    deterministic whole-game holdouts.
+    """
+    plans = tuple(plans)
+    if not plans:
+        raise ValueError("At least one Parquet dataset plan is required")
+    first = plans[0]
+    paths: list[Path] = []
+    available_columns = set(first.available_columns)
+    train_groups: set[str] = set()
+    val_groups: set[str] = set()
+    test_groups: set[str] = set()
+    rows_by_group: dict[str, int] = {}
+    path_groups: dict[Path, frozenset[str]] = {}
+    path_target_columns: dict[Path, str] = {}
+    path_candidate_value_columns: dict[Path, str] = {}
+
+    for plan in plans:
+        if plan.feature_columns != first.feature_columns:
+            raise ValueError("Cannot combine plans with different feature schemas")
+        if plan.has_game_ids != first.has_game_ids:
+            raise ValueError("Cannot combine grouped and legacy Parquet plans")
+        duplicate_paths = set(paths) & set(plan.paths)
+        if duplicate_paths:
+            raise ValueError(f"Duplicate Parquet paths across plans: {duplicate_paths}")
+        duplicate_groups = set(rows_by_group) & set(plan.rows_by_group)
+        if duplicate_groups:
+            raise ValueError(
+                "Game IDs collide across independently split corpora: "
+                f"{sorted(duplicate_groups)[:5]}"
+            )
+        paths.extend(plan.paths)
+        available_columns.intersection_update(plan.available_columns)
+        train_groups.update(plan.train_groups)
+        val_groups.update(plan.val_groups)
+        test_groups.update(plan.test_groups)
+        rows_by_group.update(plan.rows_by_group)
+        path_groups.update(plan.path_groups)
+        path_target_columns.update(plan.path_target_columns)
+        path_candidate_value_columns.update(plan.path_candidate_value_columns)
+
+    return ParquetDatasetPlan(
+        paths=tuple(paths),
+        feature_columns=first.feature_columns,
+        available_columns=frozenset(available_columns),
+        has_game_ids=first.has_game_ids,
+        train_groups=frozenset(train_groups),
+        val_groups=frozenset(val_groups),
+        test_groups=frozenset(test_groups),
+        rows_by_group=rows_by_group,
+        path_groups=path_groups,
+        path_target_columns=path_target_columns,
+        path_candidate_value_columns=path_candidate_value_columns,
+    )
 
 
 def inspect_parquet_dataset(
@@ -311,12 +384,12 @@ def inspect_parquet_dataset(
     feature_columns = tuple(sorted(c for c in first_columns if c.startswith("F_")))
     if not feature_columns:
         raise ValueError("No F_* feature columns found (vector teacher logs)")
-    if "ACTION" not in first_columns:
-        raise ValueError("Parquet must include ACTION column")
     has_game_ids = GAME_ID_COLUMN in first_columns
     path_groups: dict[Path, frozenset[str]] = {}
+    path_target_columns: dict[Path, str] = {}
+    path_candidate_value_columns: dict[Path, str] = {}
     rows_by_group: Counter[str] = Counter()
-    common_columns = set(first_columns)
+    common_columns: set[str] | None = None
 
     for path in paths:
         parquet = pq.ParquetFile(path)
@@ -326,7 +399,42 @@ def inspect_parquet_dataset(
             raise ValueError(f"Feature schema mismatch in {path}")
         if (GAME_ID_COLUMN in columns) != has_game_ids:
             raise ValueError("Cannot mix legacy and GAME_ID-aware Parquet shards")
-        common_columns.intersection_update(columns)
+        target_column = next(
+            (
+                candidate
+                for candidate in ("ACTION", DISTILLATION_TARGET_COLUMN)
+                if candidate in columns
+            ),
+            None,
+        )
+        if target_column is None:
+            raise ValueError(
+                f"Parquet must include ACTION or {DISTILLATION_TARGET_COLUMN}: {path}"
+            )
+        path_target_columns[path] = target_column
+
+        candidate_column = next(
+            (
+                candidate
+                for candidate in (
+                    CANDIDATE_VALUES_COLUMN,
+                    DISTILLATION_CANDIDATE_VALUES_COLUMN,
+                )
+                if candidate in columns
+            ),
+            None,
+        )
+        if candidate_column is not None:
+            path_candidate_value_columns[path] = candidate_column
+
+        logical_columns = set(columns)
+        logical_columns.add("ACTION")
+        if candidate_column is not None:
+            logical_columns.add(CANDIDATE_VALUES_COLUMN)
+        if common_columns is None:
+            common_columns = logical_columns
+        else:
+            common_columns.intersection_update(logical_columns)
         if has_game_ids:
             game_ids = pd.read_parquet(path, columns=[GAME_ID_COLUMN])[GAME_ID_COLUMN]
             counts = game_ids.astype(str).value_counts()
@@ -359,13 +467,15 @@ def inspect_parquet_dataset(
     return ParquetDatasetPlan(
         paths=paths,
         feature_columns=feature_columns,
-        available_columns=frozenset(common_columns),
+        available_columns=frozenset(common_columns or ()),
         has_game_ids=has_game_ids,
         train_groups=train_groups,
         val_groups=val_groups,
         test_groups=test_groups,
         rows_by_group=dict(rows_by_group),
         path_groups=path_groups,
+        path_target_columns=path_target_columns,
+        path_candidate_value_columns=path_candidate_value_columns,
     )
 
 
@@ -385,6 +495,7 @@ class ParquetDecisionBatches(_IterableDatasetBase):
         seed: int = 0,
         shuffle: bool = False,
         sample_weight_fn: Optional[Callable[[Any], np.ndarray]] = None,
+        path_weights: Optional[Mapping[Path, float]] = None,
     ):
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
@@ -397,6 +508,14 @@ class ParquetDecisionBatches(_IterableDatasetBase):
         self.seed = seed
         self.shuffle = shuffle
         self.sample_weight_fn = sample_weight_fn
+        self.path_weights = {
+            Path(path): float(weight) for path, weight in (path_weights or {}).items()
+        }
+        if any(
+            not math.isfinite(weight) or weight <= 0
+            for weight in self.path_weights.values()
+        ):
+            raise ValueError("Parquet path weights must be positive and finite")
         self.epoch = 0
 
     def set_epoch(self, epoch: int) -> None:
@@ -422,22 +541,37 @@ class ParquetDecisionBatches(_IterableDatasetBase):
         import torch
 
         wanted = self.plan.groups_for(self.split)
-        read_columns = [*self.plan.feature_columns, "ACTION"]
-        read_columns.extend(
-            c
-            for c in (
-                "ACTION_TYPE",
-                "PHASE",
-                GAME_ID_COLUMN,
-                NUM_LEGAL_COLUMN,
-                LEGAL_ACTIONS_COLUMN,
-                CANDIDATE_VALUES_COLUMN,
-            )
-            if c in self.plan.available_columns
-        )
         rng = np.random.default_rng(self.seed + self.epoch)
         for path in self._paths_for_worker():
+            target_column = self.plan.path_target_columns[path]
+            candidate_column = self.plan.path_candidate_value_columns.get(path)
+            read_columns = [*self.plan.feature_columns, target_column]
+            read_columns.extend(
+                c
+                for c in (
+                    "ACTION_TYPE",
+                    "PHASE",
+                    GAME_ID_COLUMN,
+                    NUM_LEGAL_COLUMN,
+                    LEGAL_ACTIONS_COLUMN,
+                )
+                if c in self.plan.available_columns
+            )
+            if candidate_column is not None and CANDIDATE_VALUES_COLUMN in (
+                self.plan.available_columns
+            ):
+                read_columns.append(candidate_column)
             frame = pd.read_parquet(path, columns=read_columns)
+            rename_columns = {}
+            if target_column != "ACTION":
+                rename_columns[target_column] = "ACTION"
+            if (
+                candidate_column is not None
+                and candidate_column != CANDIDATE_VALUES_COLUMN
+            ):
+                rename_columns[candidate_column] = CANDIDATE_VALUES_COLUMN
+            if rename_columns:
+                frame = frame.rename(columns=rename_columns)
             if self.plan.has_game_ids:
                 frame = frame[frame[GAME_ID_COLUMN].astype(str).isin(wanted)]
             elif str(path.resolve()) not in wanted:
@@ -451,6 +585,7 @@ class ParquetDecisionBatches(_IterableDatasetBase):
                 keep = weights > 0
                 frame = frame.iloc[np.flatnonzero(keep)]
                 weights = weights[keep]
+            weights *= self.path_weights.get(path, 1.0)
             if frame.empty:
                 continue
             order = np.arange(len(frame))

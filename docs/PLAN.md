@@ -1,6 +1,6 @@
 # Plan: evidence-first path to a stronger 1v1 bot
 
-> **Current as of 2026-07-12.** The implementation now has stricter evaluation,
+> **Current as of 2026-07-21.** The implementation now has stricter evaluation,
 > schema, provenance, BC, search-benchmark, and distillation tooling. The model
 > experiments described below have not thereby happened. Executable GPU queue
 > definitions live in `catanatron.gym.experiment_backlog`, the generated view is
@@ -14,8 +14,10 @@ Every model result recorded before the 2026-07-12 evaluation-accounting repair i
 statistics, and older seat labels were not reliable. Those reports can motivate a
 hypothesis, but they cannot promote a checkpoint or establish a current best model.
 
-The immediate goal is therefore not another long training run. It is a corrected,
-repeatable baseline from which model changes can be measured.
+The immediate goal is not another long PPO run. Corrected evidence now shows that the
+hybrid-BC parent has a real but incomplete signal against `F`, while PPO—including a broad
+forward-KL anchor sweep—rapidly removes it. The next bounded test is one `F`-labelled
+student-visited DAgger iteration followed by a fresh hybrid-BC fit.
 
 ## What is implemented
 
@@ -38,12 +40,26 @@ repeatable baseline from which model changes can be measured.
 
 ## What is not yet evidence
 
-- no legacy checkpoint has been re-evaluated under the repaired accounting;
-- `05-mcts-strength-sweep` has not been run;
-- legal-masked and listwise BC have not been compared on a locked held-out corpus;
-- no DAgger/search-distillation iteration has been used to train and evaluate a model;
-- no GPU backlog experiment has completed;
+- the retained legacy checkpoints have not all been re-evaluated under repaired accounting;
+- the completed teacher-population screen used only two games per matchup, so it is a
+  directional diagnostic rather than teacher-promotion evidence;
+- no DAgger iteration has yet been used to train and evaluate a model;
+- no candidate has retained both an `F >= 10%` signal and all weak gates after PPO;
 - no 5M promotion or AlphaZero-style training has been justified or run.
+
+## Current decision
+
+The corrected hybrid-BC parent is the control: `R=100%`, `W=98%`, `VP=100%`, and `F=24%`
+over 50 games per opponent. The 500k PPO child fell to `F=0%`. Two 10k-step anchor sweeps
+covering coefficients `0`, `0.01`, `0.03`, `0.10`, `0.3`, `1`, `3`, and `10` all hit the
+retention stop; the best anchored candidates reached only `F=5%`. Treat PPO retention as
+rejected for now.
+
+Run one bounded DAgger iteration with the hybrid-BC checkpoint controlling its seat, `F`
+both labelling and opposing it, 100 alternating-seat games, immutable verified shards, and
+candidate scores. Retrain the same hybrid objective on the frozen base split plus a
+separately split, 4x-weighted augmentation. Keep the iteration only if a promotion-suite
+report improves `F` win rate or VP margin without losing the weak gates.
 
 ## Execution order
 
@@ -65,18 +81,19 @@ The rebaseline becomes the control for every later branch. If an artifact cannot
 to its checkpoint hash and schema, record it as legacy context rather than promotion
 evidence.
 
-### 2. Measure repaired MCTS before using search as a teacher
+### 2. Measured MCTS; keep `F` as the practical teacher
 
-Run `05-mcts-strength-sweep`: 10/25/50/100 ms budgets against `F` and `AB:2`, both seats,
-three held-out seeds, with p95 latency and a complete JSON report. The implementation now
-models the balanced dice deck and robber-steal probabilities used by this rules preset,
-but only measured strength can show whether a practical search budget is useful.
+The completed `05-mcts-strength-sweep` found only 5–10% wins against `F` at 100 ms, with
+p95 latency around 283 ms. The later population diagnostic completed all 28 two-game cells:
+`AB:2` was fast but lost both games to `F`; `M:800` and `M:2000` each split their two games
+against `F` but cost about 1.22 s and 3.21 s p95 respectively. This sample is too small to
+promote a search teacher and does not displace `F` for the bounded DAgger pilot.
 
 Accept a search teacher only if the sweep is complete, reproducible, and stronger than
 the reactive baseline at an affordable latency. A profile-only run is diagnostic and does
 not satisfy this gate.
 
-### 3. Make behavioral cloning learn legal choices
+### 3. Hybrid BC established the supervised control
 
 Create one locked train/validation/test split by whole game and compare:
 
@@ -89,9 +106,13 @@ regret when candidate values exist, otherwise by validation loss. Do not accept 
 raw action accuracy alone. The listwise checkpoint must lower held-out regret and then
 improve locked F/search outcome or VP-margin evidence over the legal-CE checkpoint.
 
-### 4. Distil search on states the student actually visits
+The selected hybrid legal-CE/listwise checkpoint now supplies the control described above.
+The next supervised comparison holds its base corpus, objective, architecture, and split
+fixed while adding only the independently split DAgger corpus.
 
-If Stage 2 finds a credible teacher, run small DAgger/expert-iteration cycles:
+### 4. Distil `F` on states the student actually visits
+
+Use `F`, the strongest measured practical teacher, for small DAgger/expert-iteration cycles:
 
 1. let the current student generate its own visited states;
 2. label each legal-action set with F or fixed-simulation MCTS;
@@ -103,9 +124,11 @@ Start with tens of games, not a large generation job. Continue only while held-o
 and locked gameplay evidence improve. The implemented CLI is a data-collection scaffold;
 it does not claim that expert iteration has already succeeded.
 
-### 5. Run controlled PPO only from an accepted parent
+### 5. Pause PPO until supervised improvement is accepted
 
-PPO is a refinement stage, not the source of a new hypothesis. Hold dataset, model schema,
+PPO remains a refinement stage, not the source of a new hypothesis. The completed anchor
+diagnostics failed to retain the hybrid-BC signal even at coefficient `10`, so do not launch
+more PPO until DAgger or another supervised treatment improves the locked parent. Then hold dataset, model schema,
 PPO hyperparameters, seed suite, and evaluation protocol fixed. Change one treatment at a
 time, beginning with the actual-VP versus visible-VP reward pair only after the corrected
 baseline and teacher/BC decisions are recorded.

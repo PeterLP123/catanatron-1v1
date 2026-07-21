@@ -444,6 +444,8 @@ class BcCheckpointMeta:
     val_accuracy: Optional[float] = None
     train_rows: int = 0
     data_dirs: list[str] = field(default_factory=list)
+    augmentation_data_dirs: list[str] = field(default_factory=list)
+    augmentation_weight: float = 1.0
     val_loss: Optional[float] = None
     loss_name: str = "cross_entropy"
     listwise_temperature: Optional[float] = None

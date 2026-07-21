@@ -205,15 +205,15 @@ stream, iterations are immutable, and replay manifests contain agent, schema, an
 ```bash
 # Inspect resolved identities and seeds without playing games.
 python examples/colonist_1v1_distill.py \
-  --student T:runs/bc-legal/bc.pt \
-  --teacher M:50:False:base_fn \
+  --student T:runs/bc-hybrid/bc.pt \
+  --teacher F \
   --opponent F --iteration 0 --games 20 \
   --output data/distill --dry-run
 
 # Collect, then verify, one small iteration.
 python examples/colonist_1v1_distill.py \
-  --student T:runs/bc-legal/bc.pt \
-  --teacher M:50:False:base_fn \
+  --student T:runs/bc-hybrid/bc.pt \
+  --teacher F \
   --opponent F --iteration 0 --games 20 \
   --output data/distill
 
@@ -224,6 +224,27 @@ python examples/colonist_1v1_distill.py \
 Teachers are limited to `F` or fixed-simulation MCTS. Wall-clock MCTS teachers are rejected
 because machine load would change labels. This CLI implements trustworthy data collection,
 not an automatic large expert-iteration training loop.
+
+The BC trainer accepts verified distillation roots directly. `TEACHER_ACTION` becomes the
+supervised target and `CANDIDATE_SCORES` becomes the listwise value vector. Keep the original
+corpus under `--data-dir` and add DAgger data with `--augmentation-data-dir`; the two corpora
+are split independently so appending an iteration cannot move frozen base games across
+train/validation/test boundaries:
+
+```bash
+python examples/colonist_1v1_bc.py \
+  --data-dir data/hard_state_v2/F_F data/hard_state_v2/VP_F \
+  --augmentation-data-dir data/distill --augmentation-weight 4 \
+  --loss hybrid --hybrid-listwise-weight 0.003 \
+  --listwise-temperature 0.02 --epochs 10 \
+  --val-fraction 0.1 --test-fraction 0.1 \
+  --split-seed 101 --seed 101 --device auto \
+  --out runs/dagger-bc/bc.pt --run-dir runs/dagger-bc
+```
+
+For the frozen 100-game pilot, use `scripts/gpu/run_dagger_f_pilot.sh` and monitor it with
+`scripts/gpu/watch_dagger_f_pilot.sh`. Non-finite candidate placeholders from teachers that
+cannot score legal actions are excluded from listwise loss instead of being treated as data.
 
 ## 4. Train MaskablePPO
 

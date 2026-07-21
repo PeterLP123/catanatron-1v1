@@ -27,6 +27,7 @@ from catanatron.gym.bc_training import (
     DecisionMetricAccumulator,
     ParquetDecisionBatches,
     candidate_listwise_loss,
+    combine_parquet_dataset_plans,
     hash_parquet_shards,
     inspect_parquet_dataset,
     legal_masked_cross_entropy,
@@ -40,6 +41,7 @@ from catanatron.gym.colonist_training import (
     hard_state_sample_weights,
     resolve_teacher_parquet_paths,
 )
+from catanatron.gym.distillation import verify_distillation_dataset
 from catanatron.gym.model_schema import (
     build_model_schema,
     checkpoint_schema_path,
@@ -59,6 +61,22 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         required=True,
         help="One or more directories of game *.parquet files.",
+    )
+    parser.add_argument(
+        "--augmentation-data-dir",
+        type=Path,
+        nargs="+",
+        default=None,
+        help=(
+            "Additional teacher-labelled corpora, such as DAgger iterations. "
+            "They are split independently so the frozen base split does not move."
+        ),
+    )
+    parser.add_argument(
+        "--augmentation-weight",
+        type=float,
+        default=1.0,
+        help="Training-only sample weight for rows from --augmentation-data-dir.",
     )
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=4096)
@@ -152,6 +170,41 @@ def _resolve_dataset_paths(
 ) -> list[Path]:
     paths: list[Path] = []
     for directory in data_dirs:
+        aggregate_path = directory / "manifest.json"
+        aggregate = (
+            json.loads(aggregate_path.read_text(encoding="utf-8"))
+            if aggregate_path.is_file()
+            else None
+        )
+        if isinstance(aggregate, dict) and isinstance(
+            aggregate.get("iterations"), list
+        ):
+            problems = verify_distillation_dataset(directory)
+            if problems:
+                raise ValueError(
+                    f"Distillation dataset {directory} failed integrity checks: "
+                    + "; ".join(problems)
+                )
+            distillation_paths: list[Path] = []
+            for iteration in aggregate["iterations"]:
+                manifest_path = directory / iteration["manifest"]
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                schema = manifest.get("metadata", {}).get("schema")
+                if not isinstance(schema, dict):
+                    raise ValueError(
+                        f"Distillation manifest {manifest_path} has no model schema"
+                    )
+                validate_model_schema(
+                    expected_schema,
+                    schema,
+                    context=f"distillation dataset {directory}",
+                )
+                distillation_paths.extend(
+                    directory / shard["path"] for shard in manifest.get("shards", [])
+                )
+            paths.extend(distillation_paths)
+            continue
+
         meta_path = directory / "dataset_meta.json"
         meta: dict[str, Any] = {}
         if meta_path.exists():
@@ -317,6 +370,8 @@ def main(argv: list[str] | None = None) -> None:
         raise ValueError("epochs must be positive")
     if args.hybrid_listwise_weight < 0:
         raise ValueError("hybrid_listwise_weight must be non-negative")
+    if not math.isfinite(args.augmentation_weight) or args.augmentation_weight <= 0:
+        raise ValueError("augmentation_weight must be positive and finite")
     seed = args.split_seed if args.seed is None else args.seed
     seed_everything(seed)
 
@@ -329,14 +384,42 @@ def main(argv: list[str] | None = None) -> None:
         else None
     )
     if tracker:
-        tracker.phase("bc_training", data_dirs=[str(path) for path in args.data_dir])
+        tracker.phase(
+            "bc_training",
+            data_dirs=[str(path) for path in args.data_dir],
+            augmentation_data_dirs=[
+                str(path) for path in (args.augmentation_data_dir or [])
+            ],
+        )
 
     model_schema = build_model_schema(feature_profile=args.feature_profile)
-    paths = _resolve_dataset_paths(
+    base_paths = _resolve_dataset_paths(
         args.data_dir,
         expected_schema=model_schema,
         allow_legacy_schema=args.allow_legacy_dataset_schema,
     )
+    base_plan = inspect_parquet_dataset(
+        base_paths,
+        val_fraction=args.val_fraction,
+        test_fraction=args.test_fraction,
+        seed=args.split_seed,
+    )
+    augmentation_paths: list[Path] = []
+    plan = base_plan
+    if args.augmentation_data_dir:
+        augmentation_paths = _resolve_dataset_paths(
+            args.augmentation_data_dir,
+            expected_schema=model_schema,
+            allow_legacy_schema=args.allow_legacy_dataset_schema,
+        )
+        augmentation_plan = inspect_parquet_dataset(
+            augmentation_paths,
+            val_fraction=args.val_fraction,
+            test_fraction=args.test_fraction,
+            seed=args.split_seed,
+        )
+        plan = combine_parquet_dataset_plans((base_plan, augmentation_plan))
+    paths = [*base_paths, *augmentation_paths]
     print(f"Hashing {len(paths):,} selected input shards ...")
     input_shards, dataset_sha256 = hash_parquet_shards(paths)
     print(f"dataset_sha256={dataset_sha256}")
@@ -352,12 +435,6 @@ def main(argv: list[str] | None = None) -> None:
                 "input_shards": input_shards,
             }
         )
-    plan = inspect_parquet_dataset(
-        paths,
-        val_fraction=args.val_fraction,
-        test_fraction=args.test_fraction,
-        seed=args.split_seed,
-    )
     has_legal = LEGAL_ACTIONS_COLUMN in plan.available_columns
     has_candidates = CANDIDATE_VALUES_COLUMN in plan.available_columns
     loss_name = args.loss
@@ -400,6 +477,9 @@ def main(argv: list[str] | None = None) -> None:
     print(f"loss={loss_name} device={device} seed={seed}")
 
     sample_weight_fn = hard_state_sample_weights if args.hard_states else None
+    augmentation_path_weights = {
+        path: args.augmentation_weight for path in augmentation_paths
+    }
     train_data = ParquetDecisionBatches(
         plan,
         "train",
@@ -407,6 +487,7 @@ def main(argv: list[str] | None = None) -> None:
         seed=seed,
         shuffle=True,
         sample_weight_fn=sample_weight_fn,
+        path_weights=augmentation_path_weights,
     )
     val_data = ParquetDecisionBatches(
         plan, "val", batch_size=args.batch_size, seed=seed
@@ -547,7 +628,14 @@ def main(argv: list[str] | None = None) -> None:
         epochs=args.epochs,
         val_accuracy=best_val_metrics.get("accuracy"),
         train_rows=last_train_rows,
-        data_dirs=[str(path) for path in args.data_dir],
+        data_dirs=[
+            *[str(path) for path in args.data_dir],
+            *[str(path) for path in (args.augmentation_data_dir or [])],
+        ],
+        augmentation_data_dirs=[
+            str(path) for path in (args.augmentation_data_dir or [])
+        ],
+        augmentation_weight=args.augmentation_weight,
         val_loss=best_val_loss,
         loss_name=loss_name,
         listwise_temperature=(

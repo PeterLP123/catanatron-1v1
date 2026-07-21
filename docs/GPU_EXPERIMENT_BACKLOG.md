@@ -1,9 +1,10 @@
 # GPU experiment backlog
 
-This is the executable, evidence-gated queue for the portable GPU workflow. No queue experiment
-has completed as of 2026-07-12. Historical evaluation numbers are provisional, so complete
-the corrected legacy rebaseline in [RESULTS_LOG.md](RESULTS_LOG.md) before interpreting a
-new training result.
+This is the executable, evidence-gated queue for the portable GPU workflow. Experiments
+`10`, `11`, `12`, and `20` have completed, along with off-queue hybrid-BC and anchor
+diagnostics `22`–`25`. Their evidence rejects visible-VP reward, confirms the raw hybrid-BC
+signal, and shows that forward-KL anchoring did not prevent rapid PPO forgetting. See
+[RESULTS_LOG.md](RESULTS_LOG.md) before interpreting a new training result.
 
 Definitions and predicates live in `catanatron.gym.experiment_backlog`. A run directory or a
 manifest phase of `done` is not enough to unlock the next job: the backlog inspects smoke
@@ -149,6 +150,29 @@ python examples/colonist_1v1_backlog.py start \
 Experiment `21` uses the same two required flags and is available only when the visible-VP
 reward branch was accepted. Lower regret is a preflight requirement, not sufficient gameplay
 evidence: the completed run must also improve F rate or F VP margin over its matched parent.
+
+## DAgger F pilot after anchor rejection
+
+The next bounded experiment is deliberately outside the PPO queue. It lets the raw
+hybrid-BC checkpoint visit its own failure states against `F`, records `F` labels and
+candidate scores without perturbing the student RNG, retrains the same hybrid objective,
+and evaluates on the promotion seed suite:
+
+```bash
+scripts/gpu/run_dagger_f_pilot.sh \
+  runs/bc-hybrid-sweep/w0030/bc.pt \
+  data/hard_state_v2/F_F \
+  data/hard_state_v2/VP_F \
+  runs/28-dagger-f-s101
+
+watch -n 10 scripts/gpu/watch_dagger_f_pilot.sh runs/28-dagger-f-s101
+```
+
+The default pilot collects 100 alternating-seat games and gives augmentation rows a
+training-only weight of 4. Base and augmentation games are split independently, preserving
+the frozen base split. This is promotion diagnostics, not final evidence. If it does not
+improve `F` rate or VP margin while retaining `R/W/VP`, preserve the null and stop rather
+than increasing the dataset or tuning the weight on the same promotion suite.
 
 ## Promotion and polish
 

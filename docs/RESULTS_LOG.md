@@ -9,9 +9,10 @@ This file separates historical observations from promotion-grade evidence.
 > **provisional historical estimates**, not current scorecards, promotion evidence,
 > or proof that any checkpoint is the best or most seat-balanced model.
 
-Two corrected, rejected compact results are now recorded below. They establish a
-useful failure boundary: the hybrid-BC checkpoint has material raw strength against
-`F`, but the subsequent 500k PPO run removes it. Neither checkpoint is promotion-ready.
+Corrected and diagnostic results now establish a useful failure boundary: the hybrid-BC
+checkpoint has material raw strength against `F`, the subsequent 500k PPO run removes it,
+and two forward-KL anchor sweeps do not retain it past the first 10k-step check. None is
+promotion-ready.
 
 ## Evidence standard for new entries
 
@@ -82,6 +83,10 @@ The historical runs motivate tests but do not prove a root cause:
   at 0/50 wins and -11.76 average VP difference;
 - the hybrid legal-CE plus listwise checkpoint reached 12/50 wins and -2.50 VP difference
   against `F` before PPO, so PPO forgetting is now the primary tested hypothesis;
+- the full hybrid parent retained `R=100%`, `W=98%`, and `VP=100%`, so its `F=24%` result
+  is not explained by a general collapse against the weak battery;
+- anchor coefficients from `0` through `10` all hit the 10k retention stop; coefficients
+  `3` and `10` reached only 1/20 against `F`, while every smaller coefficient was 0/20;
 - the completed `05-mcts-strength-sweep` found only a small search signal at 100 ms
   (5-10% wins against `F`) with p95 latency around 283 ms, so `F` remains the stronger
   available teacher for a DAgger pilot;
@@ -99,6 +104,10 @@ The historical runs motivate tests but do not prove a root cause:
 | - | DAgger/search distillation | - | `promotion` / `final` | Not run | - |
 | 2026-07-16 | `20-hard-bc-actual-s101` | `2f4ab72a895a` | `final` | Rejected; 0/4 gates, `F` 0%, weighted score 0.3315 | [`20-hard-bc-actual-s101.json`](results/20-hard-bc-actual-s101.json) |
 | 2026-07-17 | `22-hybrid-bc-raw-f-final` | `886f5b374011` | `final` | Rejected F gate; 24% wins, -2.50 VP difference | [`22-hybrid-bc-raw-f-final.json`](results/22-hybrid-bc-raw-f-final.json) |
+| 2026-07-17 | `23-hybrid-bc-full-final` | `886f5b374011` | `final` | Rejected F gate; R/W/VP 100/98/100%, F 24%, weighted score 0.5733 | UCL run artifact |
+| 2026-07-17 | `24-bc-anchor-sweep` | multiple | diagnostic `final` | Rejected; coefficients 0/0.01/0.03/0.10 stopped at 10k, F 0/20 each | UCL run artifacts |
+| 2026-07-17 | `25-bc-anchor-scale` | multiple | diagnostic `final` | Rejected; coefficients 0.3/1/3/10 stopped at 10k, best F 1/20 | UCL run artifacts |
+| 2026-07-17 | `27-teacher-population-screen` | N/A | held-out diagnostic | Complete 28/28 two-game cells; no teacher promoted from n=2 evidence | UCL run artifact |
 
 ## Record a corrected result
 
