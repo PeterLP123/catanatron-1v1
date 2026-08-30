@@ -1,8 +1,8 @@
 # Plan: evidence-first path to a stronger 1v1 bot
 
 > **Current as of 2026-08-30.** DAgger iteration 0 is the best measured policy.
-> A retention-gated PPO warm-start from that parent is the next one-variable
-> test. Iteration 1 is discarded. Executable GPU queue definitions live in
+> Retention-gated PPO from that parent is rejected. Iteration 1 is discarded.
+> Executable GPU queue definitions live in
 > `catanatron.gym.experiment_backlog`, the generated view is
 > [GPU_EXPERIMENT_BACKLOG.md](GPU_EXPERIMENT_BACKLOG.md), and accepted evidence
 > belongs in [RESULTS_LOG.md](RESULTS_LOG.md) and [`docs/results/`](results/README.md).
@@ -45,6 +45,7 @@ the DAgger line stops at iteration 0.
 - the completed teacher-population screen used only two games per matchup, so it is a
   directional diagnostic rather than teacher-promotion evidence;
 - DAgger iteration 1 was measured and discarded: F 34% / -2.18 VP versus kept iteration 0 at 36% / -1.80 VP;
+- retention-gated PPO from DAgger-0 was measured and rejected: 10k stop, promotion F 2%;
 - no candidate has retained both an `F >= 10%` signal and all weak gates after PPO;
 - no 5M promotion or AlphaZero-style training has been justified or run.
 
@@ -59,17 +60,19 @@ margin both moved the wrong way, so do not grow the DAgger corpus or retune the
 augmentation weight on this promotion suite.
 
 The F 52% gate still fails; published promotion reports remain rejected on that gate.
-The older UCL hybrid-BC final-suite card (`F=24%`, `-2.50` VP) and the PPO/anchor
-failures still stand. The one-variable PPO test is now running: the same anchored
-recipe that forgot the weaker parent (`coef=10`, 10k-step retention, F 10% plus
-weak gates, 50k budget) warm-started from DAgger iteration 0. Keep the PPO child
-only if a locked promotion report improves F rate or VP margin without losing
-R/W/VP. If the 10k development check trips the retention stop, record the null
-and leave iteration 0 as the best policy.
+The older UCL hybrid-BC final-suite card (`F=24%`, `-2.50` VP) still stands.
+Retention-gated PPO from DAgger-0 is now a measured null: the same `coef=10`
+recipe stopped at 10k steps with development `F=5%`, then scored promotion-suite
+`R/W/VP/F = 86/70/72/2%` and F VP difference `-10.54`. Discard the PPO child.
+Do not retune the coefficient, raise the budget, or start `30-strong-promoted`.
 
 ```bash
 scripts/run_ppo_retain_dagger0.sh
 ```
+
+The best measured policy remains DAgger iteration 0. A later experiment needs a
+new hypothesis (different objective, representation, or teacher), not another
+PPO pass on this parent.
 
 Reconstruct a missing parent with `scripts/run_hybrid_bc_parent.sh`. Replay the first
 pilot with `scripts/run_strong_bot_path.sh`. `scripts/run_dagger_f_next.sh` stays for
