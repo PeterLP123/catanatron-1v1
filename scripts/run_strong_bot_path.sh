@@ -2,6 +2,7 @@
 # Evidence-first path to a stronger bot: reconstruct the hybrid-BC parent,
 # then run one bounded DAgger F iteration against that parent.
 set -euo pipefail
+export PYTHONUNBUFFERED=1
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"

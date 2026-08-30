@@ -5,6 +5,7 @@
 # locked hard_state_v2 corpora and the hybrid objective (weight 0.003) so the
 # existing DAgger command can run on a clean machine.
 set -euo pipefail
+export PYTHONUNBUFFERED=1
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
