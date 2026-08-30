@@ -180,9 +180,12 @@ watch -n 10 scripts/gpu/watch_dagger_f_pilot.sh runs/28-dagger-f-s101
 
 The default pilot collects 100 alternating-seat games and gives augmentation rows a
 training-only weight of 4. Base and augmentation games are split independently, preserving
-the frozen base split. This is promotion diagnostics, not final evidence. If it does not
-improve `F` rate or VP margin while retaining `R/W/VP`, preserve the null and stop rather
-than increasing the dataset or tuning the weight on the same promotion suite.
+the frozen base split. This is promotion diagnostics, not final evidence. Iteration 0 is
+kept: promotion-suite `F` rose from 20% / -3.18 VP to 36% / -1.80 VP and R/W/VP held at
+100%. Iteration 1 is discarded: `F` 34% / -2.18 VP, held-out regret 0.086 versus 0.080.
+Stop this DAgger line. Do not grow the corpus or retune the weight on the same promotion
+suite. `scripts/run_dagger_f_next.sh` remains only for a later student that actually
+beats iteration 0.
 
 ## Promotion and polish
 

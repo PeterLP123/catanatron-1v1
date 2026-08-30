@@ -11,8 +11,10 @@ This file separates historical observations from promotion-grade evidence.
 
 Corrected and diagnostic results now establish a useful failure boundary: the hybrid-BC
 checkpoint has material raw strength against `F`, the subsequent 500k PPO run removes it,
-and two forward-KL anchor sweeps do not retain it past the first 10k-step check. None is
-promotion-ready.
+and two forward-KL anchor sweeps do not retain it past the first 10k-step check. The first
+DAgger F iteration is kept over a reconstructed hybrid-BC parent (promotion-suite `F`
+20% → 36%). A second iteration fell to 34% and is discarded. None has passed the 52% F
+promotion gate.
 
 ## Evidence standard for new entries
 
@@ -89,7 +91,11 @@ The historical runs motivate tests but do not prove a root cause:
   `3` and `10` reached only 1/20 against `F`, while every smaller coefficient was 0/20;
 - the completed `05-mcts-strength-sweep` found only a small search signal at 100 ms
   (5-10% wins against `F`) with p95 latency around 283 ms, so `F` remains the stronger
-  available teacher for a DAgger pilot;
+  available teacher for DAgger;
+- one 100-game DAgger F iteration from the reconstructed hybrid-BC parent improved
+  promotion-suite `F` from 20% / -3.18 VP to 36% / -1.80 VP and is kept;
+- a second 100-game iteration from that student fell to `F` 34% / -2.18 VP and is
+  discarded; stop this DAgger line rather than growing the corpus;
 - old per-seat differences cannot support any seat-balance conclusion;
 - full AlphaZero-style training is a gated fallback, not the established next solution.
 
@@ -101,7 +107,9 @@ The historical runs motivate tests but do not prove a root cause:
 | 2026-07-15 | `05-mcts-strength-sweep` | N/A | Held-out search seeds | Complete diagnostic; 100 ms search reached 5-10% vs `F` | Run artifact only |
 | - | Legal-CE BC baseline | - | `promotion` / `final` | Not run | - |
 | - | Listwise BC treatment | - | `promotion` / `final` | Not run | - |
-| - | DAgger/search distillation | - | `promotion` / `final` | Not run | - |
+| 2026-08-30 | `26-hybrid-bc-parent-promotion` | `c63e7ca21f85` | `promotion` | Reconstructed hybrid-BC control; F 20% / -3.18 VP; R/W/VP 98/100/96%; F gate rejected | [`26-hybrid-bc-parent-promotion.json`](results/26-hybrid-bc-parent-promotion.json) |
+| 2026-08-30 | `28-dagger-f-s101` | `d5fab233652b` | `promotion` | DAgger iteration 0 kept; F 36% / -1.80 VP; R/W/VP 100/100/100%; F gate rejected | [`28-dagger-f-s101.json`](results/28-dagger-f-s101.json) |
+| 2026-08-30 | `29-dagger-f-iter1` | `99146ca2b06a` | `promotion` | DAgger iteration 1 discarded; F 34% / -2.18 VP; R/W/VP 100/100/100%; worse than iteration 0 | [`29-dagger-f-iter1.json`](results/29-dagger-f-iter1.json) |
 | 2026-07-16 | `20-hard-bc-actual-s101` | `2f4ab72a895a` | `final` | Rejected; 0/4 gates, `F` 0%, weighted score 0.3315 | [`20-hard-bc-actual-s101.json`](results/20-hard-bc-actual-s101.json) |
 | 2026-07-17 | `22-hybrid-bc-raw-f-final` | `886f5b374011` | `final` | Rejected F gate; 24% wins, -2.50 VP difference | [`22-hybrid-bc-raw-f-final.json`](results/22-hybrid-bc-raw-f-final.json) |
 | 2026-07-17 | `23-hybrid-bc-full-final` | `886f5b374011` | `final` | Rejected F gate; R/W/VP 100/98/100%, F 24%, weighted score 0.5733 | UCL run artifact |
