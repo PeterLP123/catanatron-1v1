@@ -23,6 +23,11 @@ Published corrected evidence:
 - [`22-hybrid-bc-raw-f-final.json`](22-hybrid-bc-raw-f-final.json): rejected
   final-seed `F` gate, but the raw hybrid-BC checkpoint won 24% with a -2.50 VP
   difference before PPO.
+- [`26-hybrid-bc-parent-promotion.json`](26-hybrid-bc-parent-promotion.json):
+  reconstructed hybrid-BC control on the promotion suite; `F` 20% with a -3.18
+  VP difference; R/W/VP held.
+- [`28-dagger-f-s101.json`](28-dagger-f-s101.json): first DAgger F iteration,
+  kept over that parent; `F` 36% with a -1.80 VP difference; R/W/VP 100%.
 
 Pre-2026-07-12 reports remain provisional and must be re-evaluated; do not
 hand-author JSON here to preserve a legacy number.
