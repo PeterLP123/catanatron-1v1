@@ -282,6 +282,11 @@ runs `0`, `0.01`, `0.03`, and `0.10` sequentially. Point a second terminal or a
 `tmux` window at `scripts/gpu/watch_bc_anchor_sweep.sh <output-root>`; wrapping it
 with `watch -n 10` provides a refreshing GPU, candidate, event, and log view.
 
+To test whether the kept DAgger-0 parent survives the same recipe, use
+`scripts/run_ppo_retain_dagger0.sh`. It warm-starts coefficient `10` (the
+least-bad prior), stops if a 20-game development eval loses F 10% or an R/W/VP
+gate, and then writes a 50-game promotion report.
+
 Named presets set runtime and evaluation cadence, then enable the mixed league:
 
 | Preset | Timesteps | Envs | Save every | Dev eval every | Dev games | Curriculum |
