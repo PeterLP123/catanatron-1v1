@@ -187,15 +187,15 @@ Stop this DAgger line. Do not grow the corpus or retune the weight on the same p
 suite. `scripts/run_dagger_f_next.sh` remains only for a later student that actually
 beats iteration 0.
 
-The next one-variable test is retention-gated PPO from that kept parent:
+Retention-gated PPO from that kept parent is rejected:
 
 ```bash
 scripts/run_ppo_retain_dagger0.sh
 ```
 
-It reuses the anchored PPO recipe (`coef=10`, 10k-step retention, F 10% plus weak
-gates). Keep the child only if a promotion report improves F rate or VP margin
-without losing R/W/VP. A 10k retention stop is a null, not a reason to retune.
+The `coef=10` recipe stopped at 10k steps (`F=5%` on 20 development games) and
+the promotion card was `R/W/VP/F = 86/70/72/2%`. Leave DAgger iteration 0 as the
+best policy. Do not retune the coefficient or start `30-strong-promoted`.
 
 ## Promotion and polish
 

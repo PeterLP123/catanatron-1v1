@@ -30,6 +30,9 @@ Published corrected evidence:
   kept over that parent; `F` 36% with a -1.80 VP difference; R/W/VP 100%.
 - [`29-dagger-f-iter1.json`](29-dagger-f-iter1.json): second DAgger F iteration,
   discarded; `F` 34% with a -2.18 VP difference, worse than iteration 0.
+- [`31-ppo-retain-dagger0.json`](31-ppo-retain-dagger0.json): retention-gated
+  PPO from DAgger-0; rejected after a 10k stop; `F` 2% with a -10.54 VP
+  difference and `R` 86%.
 
 Pre-2026-07-12 reports remain provisional and must be re-evaluated; do not
 hand-author JSON here to preserve a legacy number.
