@@ -246,7 +246,8 @@ If the hybrid-BC parent checkpoint or frozen `hard_state_v2` corpora are missing
 them with `scripts/run_hybrid_bc_parent.sh` (or run both stages with
 `scripts/run_strong_bot_path.sh`). For the frozen 100-game pilot itself, use
 `scripts/gpu/run_dagger_f_pilot.sh` and monitor it with
-`scripts/gpu/watch_dagger_f_pilot.sh`. Non-finite candidate placeholders from teachers that
+`scripts/gpu/watch_dagger_f_pilot.sh`. Continue a kept student with
+`scripts/run_dagger_f_next.sh`. Non-finite candidate placeholders from teachers that
 cannot score legal actions are excluded from listwise loss instead of being treated as data.
 
 ## 4. Train MaskablePPO
