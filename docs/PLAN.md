@@ -1,7 +1,8 @@
 # Plan: evidence-first path to a stronger 1v1 bot
 
 > **Current as of 2026-08-30.** DAgger iteration 0 is the best measured policy.
-> Iteration 1 is discarded. Executable GPU queue definitions live in
+> A retention-gated PPO warm-start from that parent is the next one-variable
+> test. Iteration 1 is discarded. Executable GPU queue definitions live in
 > `catanatron.gym.experiment_backlog`, the generated view is
 > [GPU_EXPERIMENT_BACKLOG.md](GPU_EXPERIMENT_BACKLOG.md), and accepted evidence
 > belongs in [RESULTS_LOG.md](RESULTS_LOG.md) and [`docs/results/`](results/README.md).
@@ -59,9 +60,16 @@ augmentation weight on this promotion suite.
 
 The F 52% gate still fails; published promotion reports remain rejected on that gate.
 The older UCL hybrid-BC final-suite card (`F=24%`, `-2.50` VP) and the PPO/anchor
-failures still stand. PPO retention stays rejected until a new one-variable treatment
-is specified. The DAgger line has plateaued, so a later retention-gated PPO warm-start
-from iteration 0 is now an allowed candidate, not an automatic next run.
+failures still stand. The one-variable PPO test is now running: the same anchored
+recipe that forgot the weaker parent (`coef=10`, 10k-step retention, F 10% plus
+weak gates, 50k budget) warm-started from DAgger iteration 0. Keep the PPO child
+only if a locked promotion report improves F rate or VP margin without losing
+R/W/VP. If the 10k development check trips the retention stop, record the null
+and leave iteration 0 as the best policy.
+
+```bash
+scripts/run_ppo_retain_dagger0.sh
+```
 
 Reconstruct a missing parent with `scripts/run_hybrid_bc_parent.sh`. Replay the first
 pilot with `scripts/run_strong_bot_path.sh`. `scripts/run_dagger_f_next.sh` stays for
