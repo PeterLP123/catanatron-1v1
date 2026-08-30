@@ -156,7 +156,17 @@ evidence: the completed run must also improve F rate or F VP margin over its mat
 The next bounded experiment is deliberately outside the PPO queue. It lets the raw
 hybrid-BC checkpoint visit its own failure states against `F`, records `F` labels and
 candidate scores without perturbing the student RNG, retrains the same hybrid objective,
-and evaluates on the promotion seed suite:
+and evaluates on the promotion seed suite. Reconstruct the parent on a clean machine
+before launching DAgger:
+
+```bash
+scripts/run_hybrid_bc_parent.sh
+# or both stages:
+scripts/run_strong_bot_path.sh
+watch -n 10 scripts/watch_hybrid_bc_parent.sh runs/bc-hybrid-sweep/w0030
+```
+
+The DAgger command itself is:
 
 ```bash
 scripts/gpu/run_dagger_f_pilot.sh \

@@ -61,6 +61,10 @@ candidate scores. Retrain the same hybrid objective on the frozen base split plu
 separately split, 4x-weighted augmentation. Keep the iteration only if a promotion-suite
 report improves `F` win rate or VP margin without losing the weak gates.
 
+If `runs/bc-hybrid-sweep/w0030/bc.pt` or the frozen `hard_state_v2` corpora are missing,
+reconstruct them first with `scripts/run_hybrid_bc_parent.sh`. Then run
+`scripts/run_strong_bot_path.sh` to evaluate that parent and execute the DAgger pilot.
+
 ## Execution order
 
 ### 0. Repair and freeze the measurement surface

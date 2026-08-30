@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PYTHONUNBUFFERED=1
 
 if [[ $# -ne 4 ]]; then
   echo "Usage: $0 <student-bc.pt> <base-f-f-dir> <base-vp-f-dir> <output-root>" >&2
