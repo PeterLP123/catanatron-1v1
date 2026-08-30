@@ -182,20 +182,10 @@ The default pilot collects 100 alternating-seat games and gives augmentation row
 training-only weight of 4. Base and augmentation games are split independently, preserving
 the frozen base split. This is promotion diagnostics, not final evidence. Iteration 0 is
 kept: promotion-suite `F` rose from 20% / -3.18 VP to 36% / -1.80 VP and R/W/VP held at
-100%. Continue with one more iteration from that student:
-
-```bash
-scripts/run_dagger_f_next.sh \
-  runs/28-dagger-f-s101/bc/bc.pt \
-  runs/28-dagger-f-s101/data \
-  data/hard_state_v2/F_F \
-  data/hard_state_v2/VP_F \
-  runs/29-dagger-f-iter1
-```
-
-Keep iteration 1 only if `F` rate or VP margin improves again without losing `R/W/VP`.
-If it misses, preserve iteration 0 and stop rather than growing the dataset or retuning
-the weight on the same promotion suite.
+100%. Iteration 1 is discarded: `F` 34% / -2.18 VP, held-out regret 0.086 versus 0.080.
+Stop this DAgger line. Do not grow the corpus or retune the weight on the same promotion
+suite. `scripts/run_dagger_f_next.sh` remains only for a later student that actually
+beats iteration 0.
 
 ## Promotion and polish
 

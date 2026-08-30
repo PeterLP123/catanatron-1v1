@@ -1,10 +1,10 @@
 # Plan: evidence-first path to a stronger 1v1 bot
 
-> **Current as of 2026-08-30.** The first bounded DAgger F iteration is kept.
-> Executable GPU queue definitions live in `catanatron.gym.experiment_backlog`,
-> the generated view is [GPU_EXPERIMENT_BACKLOG.md](GPU_EXPERIMENT_BACKLOG.md),
-> and accepted evidence belongs in [RESULTS_LOG.md](RESULTS_LOG.md) and
-> [`docs/results/`](results/README.md).
+> **Current as of 2026-08-30.** DAgger iteration 0 is the best measured policy.
+> Iteration 1 is discarded. Executable GPU queue definitions live in
+> `catanatron.gym.experiment_backlog`, the generated view is
+> [GPU_EXPERIMENT_BACKLOG.md](GPU_EXPERIMENT_BACKLOG.md), and accepted evidence
+> belongs in [RESULTS_LOG.md](RESULTS_LOG.md) and [`docs/results/`](results/README.md).
 
 ## Evidence reset
 
@@ -16,8 +16,8 @@ hypothesis, but they cannot promote a checkpoint or establish a current best mod
 The immediate goal is not another long PPO run. Corrected evidence showed that the
 hybrid-BC parent has a real but incomplete signal against `F`, while PPO—including a broad
 forward-KL anchor sweep—rapidly removes it. One `F`-labelled student-visited DAgger
-iteration has now been kept. The next bounded test is a second 100-game iteration from
-that stronger student.
+iteration is kept. A second 100-game iteration did not improve F rate or VP margin, so
+the DAgger line stops at iteration 0.
 
 ## What is implemented
 
@@ -43,32 +43,29 @@ that stronger student.
 - the retained legacy checkpoints have not all been re-evaluated under repaired accounting;
 - the completed teacher-population screen used only two games per matchup, so it is a
   directional diagnostic rather than teacher-promotion evidence;
-- a second DAgger iteration has not yet been measured against the kept iteration-0 parent;
+- DAgger iteration 1 was measured and discarded: F 34% / -2.18 VP versus kept iteration 0 at 36% / -1.80 VP;
 - no candidate has retained both an `F >= 10%` signal and all weak gates after PPO;
 - no 5M promotion or AlphaZero-style training has been justified or run.
 
 ## Current decision
 
 The reconstructed hybrid-BC parent is the control: promotion-suite `R=98%`, `W=100%`,
-`VP=96%`, and `F=20%` (VP difference `-3.18`) over 50 games per opponent. The first
-DAgger F iteration is kept: `R/W/VP=100/100/100%`, `F=36%` (18/50), VP difference
-`-1.80`, held-out regret `0.080` versus the parent's `0.087`. The F 52% gate still
-fails, so both reports publish as rejected promotion evidence; the iteration is kept
-because it beat its parent on F rate and VP margin without losing weak gates.
+`VP=96%`, and `F=20%` (VP difference `-3.18`) over 50 games per opponent. DAgger
+iteration 0 is the current best policy: `R/W/VP=100/100/100%`, `F=36%` (18/50), VP
+difference `-1.80`, held-out regret `0.080`. Iteration 1 is discarded: `F=34%`
+(17/50), VP difference `-2.18`, regret `0.086`. Weak gates held, but F rate and VP
+margin both moved the wrong way, so do not grow the DAgger corpus or retune the
+augmentation weight on this promotion suite.
 
+The F 52% gate still fails; published promotion reports remain rejected on that gate.
 The older UCL hybrid-BC final-suite card (`F=24%`, `-2.50` VP) and the PPO/anchor
-failures still stand. Treat PPO retention as rejected. Do not launch PPO from this
-stronger student until a later supervised plateau is recorded.
-
-Run one more 100-game DAgger iteration with the kept child controlling its seat, `F`
-labelling and opposing it, appending immutable iteration 1 onto the same distill root.
-Retrain the same hybrid objective on the frozen base split plus the aggregated 4x-weighted
-augmentation. Keep iteration 1 only if promotion-suite `F` win rate or VP margin improves
-again without losing `R/W/VP`. If it misses, stop the DAgger line and keep iteration 0.
+failures still stand. PPO retention stays rejected until a new one-variable treatment
+is specified. The DAgger line has plateaued, so a later retention-gated PPO warm-start
+from iteration 0 is now an allowed candidate, not an automatic next run.
 
 Reconstruct a missing parent with `scripts/run_hybrid_bc_parent.sh`. Replay the first
-pilot with `scripts/run_strong_bot_path.sh`. Continue from a kept student with
-`scripts/run_dagger_f_next.sh`.
+pilot with `scripts/run_strong_bot_path.sh`. `scripts/run_dagger_f_next.sh` stays for
+a future student that actually beats iteration 0.
 
 ## Execution order
 
