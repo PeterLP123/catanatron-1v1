@@ -234,7 +234,10 @@ def test_time_budget_runs_more_simulations_than_a_single_count():
     count_player = MCTSPlayer(game.state.current_color(), num_simulations=1)
     count_player.decide(game, game.playable_actions)
 
-    time_player = MCTSPlayer(game.state.current_color(), max_time_ms=100)
+    # Derive a machine-relative budget from the measured single-simulation cost
+    # to avoid flaky assumptions about absolute CI speed.
+    budget_ms = max(100.0, count_player.last_search_stats["elapsed_s"] * 1000.0 * 4.0)
+    time_player = MCTSPlayer(game.state.current_color(), max_time_ms=budget_ms)
     time_player.decide(game, game.playable_actions)
 
     assert (
