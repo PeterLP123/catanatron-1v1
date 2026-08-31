@@ -12,10 +12,13 @@ The retained project contains:
 - a two-player rules preset with a 15-point target, balanced dice, friendly robber, and a 9-card discard limit;
 - a Gymnasium environment with action masks;
 - schema-bound teacher-data generation and streaming behavioral cloning;
-- legal-action and candidate-value losses for decision-focused imitation;
-- deterministic DAgger/search-distillation data collection;
+- legal-action and candidate-value losses plus factored and narrow spatial road/robber BC residuals;
+- deterministic DAgger/search-distillation data collection with terminal outcome targets;
+- path-scoped, bounded loss/VP-deficit weighting for fresh outcome-labelled DAgger rows;
+- leakage-safe outcome-target audits, a standalone factored critic, and a bounded
+  frozen-policy critic reranker;
 - MaskablePPO training with curriculum and checkpoint-league opponents;
-- evidence-grade strength reports, artifact retention, and an optional terminal dashboard.
+- paired evidence-grade strength reports, artifact retention, and an optional terminal dashboard.
 
 The upstream React UI, Flask API, database replay service, experimental package, hosted documentation, deployment files, and cloud scripts are intentionally excluded. This fork has a small CPU GitHub Actions workflow for installed-package, lint, and test checks.
 
@@ -48,7 +51,9 @@ make smoke RUN_DIR=runs/smoke
 
 ## Training a bot
 
-The standard workflow is teacher games, behavioral cloning, PPO, then a fixed evaluation protocol.
+The supported workflow is teacher games, behavioral cloning/DAgger, optional PPO, then a fixed
+evaluation protocol. Current project evidence keeps PPO paused until a supervised candidate first
+beats the retained checkpoint without forgetting its weaker-opponent performance.
 
 ```bash
 # 1. Generate teacher trajectories.
@@ -60,7 +65,7 @@ python examples/colonist_1v1_bc.py \
   --data-dir data/c1_ff --epochs 10 --loss legal_ce \
   --out runs/my_bot/bc.pt --run-dir runs/my_bot
 
-# 3. Train with MaskablePPO and mixed league opponents.
+# 3. Optional future refinement; keep paused under the current project evidence.
 python examples/colonist_1v1_train.py \
   --preset standard --run-dir runs/my_bot \
   --bc-checkpoint runs/my_bot/bc.pt --tensorboard
@@ -114,6 +119,10 @@ Player specifications are accepted by `catanatron-play` and the evaluation scrip
 | `AB:D` | Alpha-beta search to depth `D` |
 | `L:path.zip` | MaskablePPO checkpoint |
 | `T:path.pt` | Behavioral-cloning checkpoint with adjacent metadata/schema sidecars |
+| `C:path.json` | Frozen BC policy plus hidden-safe outcome-critic reranker manifest |
+| `O:path.json` | Frozen BC policy plus deterministic setup-only value fallback manifest |
+| `N:path.json` | Frozen policy-guided same-turn PUCT with a hidden-information boundary |
+| `Q:path.json` | Experimental public-chance PUCT over dice and development-card beliefs |
 
 Run `catanatron-play --help-players` for the complete built-in list.
 

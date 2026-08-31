@@ -99,6 +99,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Explicit deterministic seed namespace (normally inferred from --eval-kind).",
     )
     p.add_argument(
+        "--seed-round",
+        type=int,
+        default=0,
+        help="Disjoint repeat of the selected locked seed suite (default: 0).",
+    )
+    p.add_argument(
         "--gate-mode",
         choices=("point", "lower_bound"),
         default="point",
@@ -141,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
             eval_kind=args.eval_kind,
             seed_suite=args.seed_suite,
+            seed_round=args.seed_round,
             gate_mode=args.gate_mode,
         )
         print_report(report)
@@ -164,7 +171,9 @@ def main(argv: list[str] | None = None) -> int:
     single_seed = (
         args.seed
         if args.seed is not None
-        else resolve_eval_seed(base_seed, suite=inferred_suite)
+        else resolve_eval_seed(
+            base_seed, suite=inferred_suite, seed_round=args.seed_round
+        )
     )
     result = evaluate_matchup(
         args.agent,
@@ -196,6 +205,7 @@ def main(argv: list[str] | None = None) -> int:
                 both_seats=args.both_seats,
                 eval_kind=args.eval_kind,
                 seed_suite=("explicit" if args.seed is not None else inferred_suite),
+                seed_round=args.seed_round,
                 base_seed=base_seed,
                 gate_mode=args.gate_mode,
                 gates=(

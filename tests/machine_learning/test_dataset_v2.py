@@ -3,6 +3,8 @@ import random
 import numpy as np
 
 from catanatron import Game, Color
+from catanatron.gym.envs.action_space import get_action_array
+from catanatron.models.enums import ActionType
 from catanatron.players.weighted_random import WeightedRandomPlayer
 from catanatron.gym.accumulators import ParquetDataAccumulator
 from catanatron.gym.colonist_training import (
@@ -260,6 +262,33 @@ def test_hard_state_weights_drop_forced_and_weight_families():
     assert w[3] == 2.0  # MOVE_ROBBER
     # Strategy decisions weigh more than an END_TURN choice.
     assert w[2] > w[1] and w[3] > w[1]
+
+
+def test_hard_state_weights_derive_family_from_distillation_action_index():
+    import pandas as pd
+
+    codec = get_action_array((Color.BLUE, Color.RED), "BASE")
+    end_turn = next(
+        index
+        for index, (family, _) in enumerate(codec)
+        if family == ActionType.END_TURN
+    )
+    settlement = next(
+        index
+        for index, (family, _) in enumerate(codec)
+        if family == ActionType.BUILD_SETTLEMENT
+    )
+    frame = pd.DataFrame(
+        {
+            "ACTION": [end_turn, settlement],
+            "NUM_LEGAL": [3, 5],
+            "PHASE": ["PLAY_TURN", "BUILD_INITIAL_SETTLEMENT"],
+        }
+    )
+
+    weights = hard_state_sample_weights(frame, setup_boost=1.5)
+
+    assert weights.tolist() == [0.25, 3.0]
 
 
 def test_sample_hard_states_excludes_forced_rows():

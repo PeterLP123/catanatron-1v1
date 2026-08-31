@@ -1,0 +1,86 @@
+{
+  "agent": "N:runs/55-visible-public-f-puct-s20260830/visible-puct.json",
+  "colonist_1v1": true,
+  "game_evidence": {
+    "rows": 400,
+    "sha256": "48d82994481471254cebb618931f1efc937d84d69a2ae0fa2e24d97d60376b8e"
+  },
+  "matchups": [
+    {
+      "agent_code": "N:runs/55-visible-public-f-puct-s20260830/visible-puct.json",
+      "avg_agent_vp": 11.4,
+      "avg_opponent_vp": 13.805,
+      "avg_turns": 97.2575,
+      "avg_vp_diff": -2.4049999999999994,
+      "completed_games": 400,
+      "draws": 0,
+      "duration_seconds": 186.2430609580042,
+      "error_games": 0,
+      "games": 400,
+      "games_seat0": 200,
+      "games_seat1": 200,
+      "gate": 0.52,
+      "gate_mode": "lower_bound",
+      "gate_value": 0.27856718806945857,
+      "losses": 271,
+      "observed_games": 400,
+      "opponent": "F",
+      "passed_gate": false,
+      "requested_games": 400,
+      "truncated_games": 0,
+      "vp_diff_seat0": -1.985,
+      "vp_diff_seat1": -2.825,
+      "wilson_high": 0.36980979934342806,
+      "wilson_low": 0.27856718806945857,
+      "win_rate": 0.3225,
+      "win_rate_seat0": 0.34,
+      "win_rate_seat1": 0.305,
+      "wins": 129
+    }
+  ],
+  "model": {
+    "agent_spec": "N:runs/55-visible-public-f-puct-s20260830/visible-puct.json",
+    "checkpoint_label": null,
+    "checkpoint_path": "runs/55-visible-public-f-puct-s20260830/visible-puct.json",
+    "file_sha256": "36e4707e76215605f4ba55334f074e3afda4ee7d3d2c8f8cfb89b03a5ac5c3f3",
+    "training_timesteps": null
+  },
+  "protocol": {
+    "base_seed": 20260701,
+    "description": "Paired checkpoint promotion schedule",
+    "gate_mode": "lower_bound",
+    "gates": {
+      "F": 0.52
+    },
+    "name": "fast-paired",
+    "num_games_per_matchup": 400,
+    "opponents": [
+      "F"
+    ],
+    "seed": 182261011,
+    "seed_round": 16,
+    "seed_suite": "promotion"
+  },
+  "result_sha256": "7385c12ec6b32bd91fee64e26ec6d879e8305ed23bf21655341bd091c28a75d5",
+  "schema_version": "catanatron-result-1",
+  "source_report": {
+    "path": "runs/56-visible-public-chance-puct-s20260830/paired-promotion-f/baseline_report.json",
+    "sha256": "f100eb7ca0153ac8f155acc8e6893b7171a38d59f8a2ba933acb6b89f3b15492"
+  },
+  "status": "rejected",
+  "summary": {
+    "accounted_games": 400,
+    "all_games_accounted": true,
+    "best_win_rate": 0.3225,
+    "completed_games": 400,
+    "error_games": 0,
+    "gates_passed_count": 0,
+    "gates_total": 1,
+    "mean_win_rate": 0.3225,
+    "observed_games": 400,
+    "requested_games": 400,
+    "truncated_games": 0,
+    "weighted_score": 0.3005335940347293,
+    "worst_win_rate": 0.3225
+  }
+}

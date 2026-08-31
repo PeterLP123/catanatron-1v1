@@ -1,0 +1,86 @@
+{
+  "agent": "O:runs/51-opening-specialist-s20260830/opening-specialist.json",
+  "colonist_1v1": true,
+  "game_evidence": {
+    "rows": 400,
+    "sha256": "477f505546f9a9390fa83bfdaf3bea96b9ddd7f20cbf0f60b132d6c569b4a52d"
+  },
+  "matchups": [
+    {
+      "agent_code": "O:runs/51-opening-specialist-s20260830/opening-specialist.json",
+      "avg_agent_vp": 11.9725,
+      "avg_opponent_vp": 13.3875,
+      "avg_turns": 95.72,
+      "avg_vp_diff": -1.4149999999999991,
+      "completed_games": 400,
+      "draws": 0,
+      "duration_seconds": 74.68918029099586,
+      "error_games": 0,
+      "games": 400,
+      "games_seat0": 200,
+      "games_seat1": 200,
+      "gate": 0.52,
+      "gate_mode": "lower_bound",
+      "gate_value": 0.31449710298654476,
+      "losses": 256,
+      "observed_games": 400,
+      "opponent": "F",
+      "passed_gate": false,
+      "requested_games": 400,
+      "truncated_games": 0,
+      "vp_diff_seat0": -1.43,
+      "vp_diff_seat1": -1.4,
+      "wilson_high": 0.40816643638136574,
+      "wilson_low": 0.31449710298654476,
+      "win_rate": 0.36,
+      "win_rate_seat0": 0.35,
+      "win_rate_seat1": 0.37,
+      "wins": 144
+    }
+  ],
+  "model": {
+    "agent_spec": "O:runs/51-opening-specialist-s20260830/opening-specialist.json",
+    "checkpoint_label": null,
+    "checkpoint_path": "runs/51-opening-specialist-s20260830/opening-specialist.json",
+    "file_sha256": "d385ad1e1afe0b94ab4d23a6f6365e2ac55d11feb985aa56e6e76071a63923c6",
+    "training_timesteps": null
+  },
+  "protocol": {
+    "base_seed": 20260701,
+    "description": "Paired checkpoint promotion schedule",
+    "gate_mode": "lower_bound",
+    "gates": {
+      "F": 0.52
+    },
+    "name": "fast-paired",
+    "num_games_per_matchup": 400,
+    "opponents": [
+      "F"
+    ],
+    "seed": 132260916,
+    "seed_round": 11,
+    "seed_suite": "promotion"
+  },
+  "result_sha256": "d13843dadd74b0a7316c25920e0a9b3914e1016e88eb7b3df4cba25c33d16759",
+  "schema_version": "catanatron-result-1",
+  "source_report": {
+    "path": "runs/51-opening-specialist-s20260830/paired-promotion-f/candidate_report.json",
+    "sha256": "257ba5ed1cf9d6986f4172af04ff94edf1ba7f8602ca649c566a8896c24ca4d2"
+  },
+  "status": "rejected",
+  "summary": {
+    "accounted_games": 400,
+    "all_games_accounted": true,
+    "best_win_rate": 0.36,
+    "completed_games": 400,
+    "error_games": 0,
+    "gates_passed_count": 0,
+    "gates_total": 1,
+    "mean_win_rate": 0.36,
+    "observed_games": 400,
+    "requested_games": 400,
+    "truncated_games": 0,
+    "weighted_score": 0.3372485514932724,
+    "worst_win_rate": 0.36
+  }
+}

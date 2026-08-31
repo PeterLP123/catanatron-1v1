@@ -9,7 +9,14 @@ from catanatron.players.minimax import AlphaBetaPlayer, SameTurnAlphaBetaPlayer
 from catanatron.players.search import VictoryPointPlayer
 from catanatron.players.mcts import MCTSPlayer
 from catanatron.players.playouts import GreedyPlayoutsPlayer
-from catanatron.players.learned import Sb3CheckpointPlayer, TorchBcCheckpointPlayer
+from catanatron.players.learned import (
+    OpeningSpecialistCheckpointPlayer,
+    OutcomeRerankerCheckpointPlayer,
+    Sb3CheckpointPlayer,
+    TorchBcCheckpointPlayer,
+)
+from catanatron.players.visible_puct import VisibleSameTurnPuctPlayer
+from catanatron.players.visible_chance_puct import VisibleChancePuctPlayer
 
 
 # Player must have a CODE, NAME, DESCRIPTION, CLASS.
@@ -76,6 +83,30 @@ CLI_PLAYERS = [
         "TorchBcCheckpointPlayer",
         "Torch BC policy (.pt + .meta.json). e.g. T:runs/colonist_bc_policy.pt",
         TorchBcCheckpointPlayer,
+    ),
+    CliPlayer(
+        "C",
+        "OutcomeRerankerCheckpointPlayer",
+        "Frozen Torch BC policy plus bounded outcome-critic reranker manifest.",
+        OutcomeRerankerCheckpointPlayer,
+    ),
+    CliPlayer(
+        "O",
+        "OpeningSpecialistCheckpointPlayer",
+        "Frozen Torch BC policy plus deterministic setup-only value fallback manifest.",
+        OpeningSpecialistCheckpointPlayer,
+    ),
+    CliPlayer(
+        "N",
+        "VisibleSameTurnPuctPlayer",
+        "Frozen policy-guided same-turn PUCT with a hidden-information boundary.",
+        VisibleSameTurnPuctPlayer,
+    ),
+    CliPlayer(
+        "Q",
+        "VisibleChancePuctPlayer",
+        "Visible same-turn PUCT with public dice and development-card chance nodes.",
+        VisibleChancePuctPlayer,
     ),
 ]
 

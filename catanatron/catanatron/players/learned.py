@@ -1,13 +1,15 @@
 """
-Learned policies as :class:`catanatron.models.player.Player` (SB3 MaskablePPO or Torch BC MLP).
+Learned policies as :class:`catanatron.models.player.Player` (SB3 or Torch BC).
 
 Used for self-play wrappers and ``catanatron-play``-style evaluation when registered.
 """
 
 from __future__ import annotations
 
+import json
 import random
 import os
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator, Optional, Sequence, Union
@@ -177,6 +179,9 @@ def load_torch_bc_player(
     n_actions: int,
     hidden_sizes: Sequence[int] = (256, 256),
     *,
+    architecture: str = "mlp",
+    embedding_dim: int = 128,
+    feature_names: Optional[Sequence[str]] = None,
     map_type: str = "BASE",
     player_colors: Sequence[Color] = (Color.BLUE, Color.RED),
     feature_profile: str = "raw",
@@ -184,17 +189,28 @@ def load_torch_bc_player(
 ) -> Colonist1v1Player:
     """Load a Torch ``state_dict`` saved by ``examples/colonist_1v1_bc.py``."""
     import torch
-    from torch import nn
+    from catanatron.gym.model_architectures import build_bc_policy
 
     with _preserve_inference_loader_rng():
-        layers = []
-        d_in = obs_dim
-        for h in hidden_sizes:
-            layers.extend([nn.Linear(d_in, h), nn.ReLU()])
-            d_in = h
-        layers.append(nn.Linear(d_in, n_actions))
-        net = nn.Sequential(*layers)
-        state = torch.load(str(checkpoint), map_location="cpu")
+        resolved_features = tuple(
+            feature_names
+            or get_feature_ordering(
+                len(player_colors), map_type, feature_profile=feature_profile
+            )
+        )
+        if len(resolved_features) != obs_dim:
+            raise ValueError(
+                f"BC feature schema has {len(resolved_features)} features; "
+                f"metadata declares {obs_dim}"
+            )
+        net = build_bc_policy(
+            architecture,
+            resolved_features,
+            n_actions,
+            hidden_sizes=hidden_sizes,
+            embedding_dim=embedding_dim,
+        )
+        state = torch.load(str(checkpoint), map_location="cpu", weights_only=True)
         net.load_state_dict(state)
         net.eval()
     return Colonist1v1Player(
@@ -254,12 +270,394 @@ class TorchBcCheckpointPlayer(Player):
             obs_dim=meta.obs_dim,
             n_actions=meta.n_actions,
             hidden_sizes=meta.hidden_sizes,
+            architecture=meta.architecture,
+            embedding_dim=meta.embedding_dim,
+            feature_names=observation_schema.get("features"),
             feature_profile=feature_profile,
             human_visible_obs=human_visible_obs,
         )
 
     def decide(self, game: "Game", playable_actions: list["Action"]) -> "Action":
         return self._inner.decide(game, playable_actions)
+
+
+class OpeningSpecialistCheckpointPlayer(Player):
+    """Frozen Torch BC policy with a deterministic setup-only value fallback."""
+
+    OPENING_PROMPTS = (
+        "BUILD_INITIAL_SETTLEMENT",
+        "BUILD_INITIAL_ROAD",
+    )
+
+    def __init__(self, color: Color, manifest: Union[str, os.PathLike[str]]):
+        super().__init__(color)
+        from catanatron.gym.provenance import sha256_file
+        from catanatron.players.value import ValueFunctionPlayer
+
+        manifest_path = Path(manifest).expanduser().resolve()
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if payload.get("kind") != "opening_specialist":
+            raise ValueError(
+                f"Unsupported opening-specialist manifest: {manifest_path}"
+            )
+        if tuple(payload.get("opening_prompts", ())) != self.OPENING_PROMPTS:
+            raise ValueError(
+                "Opening-specialist prompts must be exactly "
+                f"{list(self.OPENING_PROMPTS)}"
+            )
+        if payload.get("opening_evaluator") != "value_function_default":
+            raise ValueError(
+                "Opening-specialist evaluator must be value_function_default"
+            )
+        if payload.get("policy_frozen") is not True:
+            raise ValueError("Opening-specialist policy must be frozen")
+
+        raw_policy = Path(payload["policy_checkpoint"])
+        policy_path = (
+            raw_policy
+            if raw_policy.is_absolute()
+            else manifest_path.parent / raw_policy
+        ).resolve()
+        if not policy_path.is_file():
+            raise FileNotFoundError(
+                f"Missing opening-specialist policy checkpoint: {policy_path}"
+            )
+        expected_checkpoint_hash = payload.get("policy_checkpoint_sha256")
+        actual_checkpoint_hash = sha256_file(policy_path)
+        if actual_checkpoint_hash != expected_checkpoint_hash:
+            raise ValueError(
+                "Opening-specialist policy checkpoint hash mismatch: "
+                f"{actual_checkpoint_hash} != {expected_checkpoint_hash}"
+            )
+        for suffix, hash_key in (
+            (".meta.json", "policy_metadata_sha256"),
+            (".schema.json", "policy_schema_sha256"),
+        ):
+            sidecar = policy_path.with_suffix(suffix)
+            if not sidecar.is_file():
+                raise FileNotFoundError(
+                    f"Missing opening-specialist policy sidecar: {sidecar}"
+                )
+            expected = payload.get(hash_key)
+            if not expected:
+                raise ValueError(f"Opening-specialist manifest is missing {hash_key}")
+            actual = sha256_file(sidecar)
+            if actual != expected:
+                raise ValueError(
+                    "Opening-specialist policy sidecar hash mismatch: "
+                    f"{actual} != {expected}"
+                )
+
+        self.manifest_path = manifest_path
+        self.policy_checkpoint = policy_path
+        self.policy = TorchBcCheckpointPlayer(color, policy_path)
+        self.opening = ValueFunctionPlayer(color)
+        self.decision_stats = {
+            "decisions": 0,
+            "choice_decisions": 0,
+            "opening_decisions": 0,
+            "opening_choice_decisions": 0,
+            "policy_decisions": 0,
+            "prompt_counts": {},
+            "opening_prompt_counts": {prompt: 0 for prompt in self.OPENING_PROMPTS},
+            "opening_latencies_ms": [],
+        }
+        self.last_decision_stats = None
+
+    def decide(self, game: "Game", playable_actions: list["Action"]) -> "Action":
+        prompt = getattr(game.state, "current_prompt", None)
+        prompt_name = getattr(prompt, "name", str(prompt))
+        self.decision_stats["decisions"] += 1
+        if len(playable_actions) > 1:
+            self.decision_stats["choice_decisions"] += 1
+        prompt_counts = self.decision_stats["prompt_counts"]
+        prompt_counts[prompt_name] = prompt_counts.get(prompt_name, 0) + 1
+
+        if prompt_name in self.OPENING_PROMPTS:
+            started = time.perf_counter()
+            selected = self.opening.decide(game, playable_actions)
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            self.decision_stats["opening_decisions"] += 1
+            if len(playable_actions) > 1:
+                self.decision_stats["opening_choice_decisions"] += 1
+            self.decision_stats["opening_prompt_counts"][prompt_name] += 1
+            self.decision_stats["opening_latencies_ms"].append(elapsed_ms)
+            route = "opening_value_function"
+        else:
+            selected = self.policy.decide(game, playable_actions)
+            elapsed_ms = None
+            self.decision_stats["policy_decisions"] += 1
+            route = "frozen_policy"
+        self.last_decision_stats = {
+            "prompt": prompt_name,
+            "route": route,
+            "num_playable_actions": len(playable_actions),
+            "latency_ms": elapsed_ms,
+        }
+        return selected
+
+    def stats_summary(self) -> dict[str, object]:
+        latencies = np.asarray(self.decision_stats["opening_latencies_ms"], dtype=float)
+        return {
+            "decisions": int(self.decision_stats["decisions"]),
+            "choice_decisions": int(self.decision_stats["choice_decisions"]),
+            "opening_decisions": int(self.decision_stats["opening_decisions"]),
+            "opening_choice_decisions": int(
+                self.decision_stats["opening_choice_decisions"]
+            ),
+            "policy_decisions": int(self.decision_stats["policy_decisions"]),
+            "prompt_counts": dict(self.decision_stats["prompt_counts"]),
+            "opening_prompt_counts": dict(self.decision_stats["opening_prompt_counts"]),
+            "opening_latency_mean_ms": (
+                float(latencies.mean()) if len(latencies) else None
+            ),
+            "opening_latency_p95_ms": (
+                float(np.percentile(latencies, 95)) if len(latencies) else None
+            ),
+            "opening_latency_max_ms": (
+                float(latencies.max()) if len(latencies) else None
+            ),
+        }
+
+
+class OutcomeRerankerCheckpointPlayer(Player):
+    """Frozen Torch BC policy with a bounded top-k outcome-critic reranker."""
+
+    def __init__(self, color: Color, manifest: Union[str, os.PathLike[str]]):
+        super().__init__(color)
+        import torch
+        from catanatron.gym.model_architectures import FactoredOutcomeCritic
+        from catanatron.gym.provenance import sha256_file
+
+        manifest_path = Path(manifest).expanduser().resolve()
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if payload.get("kind") != "outcome_critic_reranker":
+            raise ValueError(f"Unsupported reranker manifest: {manifest_path}")
+        expected_chance_handling = "public_only_spectrum_with_policy_fallback"
+        if payload.get("chance_handling") != expected_chance_handling:
+            raise ValueError(
+                "Outcome reranker manifest must declare hidden-safe chance handling: "
+                f"{expected_chance_handling}"
+            )
+
+        def resolve_checkpoint(key: str) -> Path:
+            raw = Path(payload[key])
+            path = raw if raw.is_absolute() else manifest_path.parent / raw
+            path = path.resolve()
+            if not path.is_file():
+                raise FileNotFoundError(f"Missing reranker {key}: {path}")
+            expected = payload.get(f"{key}_sha256")
+            actual = sha256_file(path)
+            if expected != actual:
+                raise ValueError(
+                    f"Reranker {key} hash mismatch: {actual} != {expected}"
+                )
+            return path
+
+        policy_path = resolve_checkpoint("policy_checkpoint")
+        critic_path = resolve_checkpoint("critic_checkpoint")
+        for label, path in (("policy", policy_path), ("critic", critic_path)):
+            for suffix, hash_key in (
+                (".meta.json", f"{label}_metadata_sha256"),
+                (".schema.json", f"{label}_schema_sha256"),
+            ):
+                sidecar = path.with_suffix(suffix)
+                if not sidecar.is_file():
+                    raise FileNotFoundError(
+                        f"Missing reranker {label} sidecar: {sidecar}"
+                    )
+                expected = payload.get(hash_key)
+                if not expected:
+                    raise ValueError(f"Reranker manifest is missing {hash_key}")
+                actual = sha256_file(sidecar)
+                if actual != expected:
+                    raise ValueError(
+                        f"Reranker {label} sidecar hash mismatch: "
+                        f"{actual} != {expected}"
+                    )
+        self.top_k = int(payload["top_k"])
+        self.minimum_win_probability_improvement = float(
+            payload["minimum_win_probability_improvement"]
+        )
+        if self.top_k < 1:
+            raise ValueError("Reranker top_k must be positive")
+        if not 0 <= self.minimum_win_probability_improvement <= 1:
+            raise ValueError(
+                "minimum_win_probability_improvement must be between 0 and 1"
+            )
+
+        self.policy = TorchBcCheckpointPlayer(color, policy_path)
+        critic_meta_path = critic_path.with_suffix(".meta.json")
+        critic_meta = json.loads(critic_meta_path.read_text(encoding="utf-8"))
+        if critic_meta.get("kind") != "factored_outcome_critic":
+            raise ValueError(f"Unsupported outcome critic metadata: {critic_meta_path}")
+        critic_schema = read_model_schema(checkpoint_schema_path(critic_path))
+        if critic_schema is None:
+            raise FileNotFoundError(f"Missing critic schema for {critic_path}")
+        expected_schema = build_model_schema()
+        validate_model_schema(
+            expected_schema, critic_schema, context="Outcome critic reranker"
+        )
+        self.feature_columns = tuple(critic_meta["feature_columns"])
+        expected_features = tuple(critic_schema["observation"]["features"])
+        self.sample_features = tuple(
+            name.removeprefix("F_") for name in self.feature_columns
+        )
+        if self.sample_features != expected_features:
+            raise ValueError("Critic metadata feature columns do not match its schema")
+        policy_features = tuple(self.policy._inner.features)
+        if self.sample_features != policy_features:
+            raise ValueError("Policy and critic observation order differs")
+        with _preserve_inference_loader_rng():
+            self.critic = FactoredOutcomeCritic(
+                self.feature_columns,
+                embedding_dim=int(critic_meta["embedding_dim"]),
+            )
+            state = torch.load(critic_path, map_location="cpu", weights_only=True)
+            self.critic.load_state_dict(state)
+            self.critic.eval()
+        self.decision_stats = {
+            "decisions": 0,
+            "choice_decisions": 0,
+            "reranked_decisions": 0,
+            "fallback_decisions": 0,
+            "candidate_actions_evaluated": 0,
+            "latencies_ms": [],
+            "accepted_improvements": [],
+        }
+        self.last_decision_stats = None
+
+    def _critic_action_value(self, game: "Game", action: "Action") -> float:
+        import torch
+        from catanatron.players.visible_chance_puct import public_action_spectrum
+
+        total_probability = 0.0
+        weighted_probability = 0.0
+        for outcome_game, probability in public_action_spectrum(game, action):
+            winner = outcome_game.winning_color()
+            if winner is not None:
+                win_probability = 1.0 if winner == self.color else 0.0
+            else:
+                sample = create_sample(outcome_game, self.color, feature_profile="raw")
+                observation = np.asarray(
+                    [sample[name] for name in self.sample_features], dtype=np.float32
+                )
+                with torch.no_grad():
+                    output = self.critic(torch.from_numpy(observation).unsqueeze(0))
+                    win_probability = float(torch.sigmoid(output.win_logit).item())
+            weighted_probability += float(probability) * win_probability
+            total_probability += float(probability)
+        return (
+            weighted_probability / total_probability if total_probability > 0 else 0.5
+        )
+
+    def decide(self, game: "Game", playable_actions: list["Action"]) -> "Action":
+        import torch
+
+        self.decision_stats["decisions"] += 1
+        if len(playable_actions) <= 1:
+            return playable_actions[0]
+        from catanatron.players.visible_chance_puct import (
+            PUBLIC_CHANCE_SEARCH_ACTIONS,
+        )
+
+        if any(
+            action.action_type not in PUBLIC_CHANCE_SEARCH_ACTIONS
+            for action in playable_actions
+        ):
+            self.decision_stats["fallback_decisions"] += 1
+            selected = self.policy.decide(game, playable_actions)
+            self.last_decision_stats = {
+                "reranked": False,
+                "fallback": "outside_public_chance_boundary",
+            }
+            return selected
+        started = time.perf_counter()
+        self.decision_stats["choice_decisions"] += 1
+        sample = create_sample(game, self.color, feature_profile="raw")
+        observation = np.asarray(
+            [sample[name] for name in self.sample_features], dtype=np.float32
+        )
+        with torch.no_grad():
+            logits = (
+                self.policy._inner.torch_policy(
+                    torch.from_numpy(observation).unsqueeze(0)
+                )
+                .squeeze(0)
+                .numpy()
+            )
+        indexed = [
+            (
+                to_action_space(
+                    action,
+                    self.policy._inner.player_colors,
+                    self.policy._inner.map_type,
+                ),
+                action,
+            )
+            for action in playable_actions
+        ]
+        indexed.sort(key=lambda item: (-float(logits[item[0]]), item[0]))
+        shortlist = indexed[: min(self.top_k, len(indexed))]
+        python_state = random.getstate()
+        numpy_state = np.random.get_state()
+        try:
+            scored = [
+                (self._critic_action_value(game, action), action_index, action)
+                for action_index, action in shortlist
+            ]
+        finally:
+            random.setstate(python_state)
+            np.random.set_state(numpy_state)
+        self.decision_stats["candidate_actions_evaluated"] += len(scored)
+        champion_score = scored[0][0]
+        best_score, _, best_action = max(scored, key=lambda item: (item[0], -item[1]))
+        improvement = best_score - champion_score
+        reranked = (
+            best_action != shortlist[0][1]
+            and improvement >= self.minimum_win_probability_improvement
+        )
+        selected = best_action if reranked else shortlist[0][1]
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        self.decision_stats["latencies_ms"].append(elapsed_ms)
+        if reranked:
+            self.decision_stats["reranked_decisions"] += 1
+            self.decision_stats["accepted_improvements"].append(improvement)
+        self.last_decision_stats = {
+            "reranked": reranked,
+            "shortlist": len(shortlist),
+            "champion_score": champion_score,
+            "best_score": best_score,
+            "improvement": improvement,
+            "latency_ms": elapsed_ms,
+        }
+        return selected
+
+    def stats_summary(self) -> dict[str, float | int | None]:
+        latencies = np.asarray(self.decision_stats["latencies_ms"], dtype=float)
+        improvements = np.asarray(
+            self.decision_stats["accepted_improvements"], dtype=float
+        )
+        choices = int(self.decision_stats["choice_decisions"])
+        reranked = int(self.decision_stats["reranked_decisions"])
+        return {
+            "decisions": int(self.decision_stats["decisions"]),
+            "choice_decisions": choices,
+            "reranked_decisions": reranked,
+            "fallback_decisions": int(self.decision_stats["fallback_decisions"]),
+            "rerank_rate": reranked / choices if choices else 0.0,
+            "candidate_actions_evaluated": int(
+                self.decision_stats["candidate_actions_evaluated"]
+            ),
+            "latency_mean_ms": float(latencies.mean()) if len(latencies) else None,
+            "latency_p95_ms": (
+                float(np.percentile(latencies, 95)) if len(latencies) else None
+            ),
+            "latency_max_ms": float(latencies.max()) if len(latencies) else None,
+            "accepted_improvement_mean": (
+                float(improvements.mean()) if len(improvements) else None
+            ),
+        }
 
 
 class Sb3CheckpointPlayer(Player):

@@ -1,0 +1,86 @@
+{
+  "agent": "T:runs/45-spatial-robber-residual-cpu-s101/bc/bc.pt",
+  "colonist_1v1": true,
+  "game_evidence": {
+    "rows": 200,
+    "sha256": "0b7a57b126f329c19d2d1a6f3cc16b109f50de8b6e141a4367143f727a71dbf7"
+  },
+  "matchups": [
+    {
+      "agent_code": "T:runs/45-spatial-robber-residual-cpu-s101/bc/bc.pt",
+      "avg_agent_vp": 11.17,
+      "avg_opponent_vp": 13.835,
+      "avg_turns": 95.58,
+      "avg_vp_diff": -2.665000000000001,
+      "completed_games": 200,
+      "draws": 0,
+      "duration_seconds": 30.358448459010106,
+      "error_games": 0,
+      "games": 200,
+      "games_seat0": 100,
+      "games_seat1": 100,
+      "gate": 0.52,
+      "gate_mode": "lower_bound",
+      "gate_value": 0.24998842733633997,
+      "losses": 138,
+      "observed_games": 200,
+      "opponent": "F",
+      "passed_gate": false,
+      "requested_games": 200,
+      "truncated_games": 0,
+      "vp_diff_seat0": -2.33,
+      "vp_diff_seat1": -3.0,
+      "wilson_high": 0.377173054912622,
+      "wilson_low": 0.24998842733633997,
+      "win_rate": 0.31,
+      "win_rate_seat0": 0.32,
+      "win_rate_seat1": 0.3,
+      "wins": 62
+    }
+  ],
+  "model": {
+    "agent_spec": "T:runs/45-spatial-robber-residual-cpu-s101/bc/bc.pt",
+    "checkpoint_label": null,
+    "checkpoint_path": "runs/45-spatial-robber-residual-cpu-s101/bc/bc.pt",
+    "file_sha256": "dc58347a66424dd40eeaaa7cf84b581145b824a67f30b817e0c27e396d746a43",
+    "training_timesteps": null
+  },
+  "protocol": {
+    "base_seed": 20260701,
+    "description": "Paired checkpoint promotion schedule",
+    "gate_mode": "lower_bound",
+    "gates": {
+      "F": 0.52
+    },
+    "name": "fast-paired",
+    "num_games_per_matchup": 200,
+    "opponents": [
+      "F"
+    ],
+    "seed": 92260840,
+    "seed_round": 7,
+    "seed_suite": "promotion"
+  },
+  "result_sha256": "df22fc117c766cf0303cd9a9b7c53dbf6d9385a7b51725601a416137c3892446",
+  "schema_version": "catanatron-result-1",
+  "source_report": {
+    "path": "runs/45-spatial-robber-residual-cpu-s101/paired-promotion-f/candidate_report.json",
+    "sha256": "28cb3f274ba5cf58ab4afe47950db98b42b0d889975aef05e8cc492078fc6cf9"
+  },
+  "status": "rejected",
+  "summary": {
+    "accounted_games": 200,
+    "all_games_accounted": true,
+    "best_win_rate": 0.31,
+    "completed_games": 200,
+    "error_games": 0,
+    "gates_passed_count": 0,
+    "gates_total": 1,
+    "mean_win_rate": 0.31,
+    "observed_games": 200,
+    "requested_games": 200,
+    "truncated_games": 0,
+    "weighted_score": 0.27999421366817,
+    "worst_win_rate": 0.31
+  }
+}

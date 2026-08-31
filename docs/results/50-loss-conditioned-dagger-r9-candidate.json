@@ -1,0 +1,86 @@
+{
+  "agent": "T:runs/50-loss-conditioned-dagger-s20260830/bc/bc.pt",
+  "colonist_1v1": true,
+  "game_evidence": {
+    "rows": 200,
+    "sha256": "580d3b6b72cb0a18cb5dc05b415f70012962b576213472f5072ccfdb057ee32f"
+  },
+  "matchups": [
+    {
+      "agent_code": "T:runs/50-loss-conditioned-dagger-s20260830/bc/bc.pt",
+      "avg_agent_vp": 11.0,
+      "avg_opponent_vp": 13.865,
+      "avg_turns": 97.805,
+      "avg_vp_diff": -2.865,
+      "completed_games": 200,
+      "draws": 0,
+      "duration_seconds": 31.013342499994906,
+      "error_games": 0,
+      "games": 200,
+      "games_seat0": 100,
+      "games_seat1": 100,
+      "gate": 0.52,
+      "gate_mode": "lower_bound",
+      "gate_value": 0.20868060011609973,
+      "losses": 147,
+      "observed_games": 200,
+      "opponent": "F",
+      "passed_gate": false,
+      "requested_games": 200,
+      "truncated_games": 0,
+      "vp_diff_seat0": -2.07,
+      "vp_diff_seat1": -3.66,
+      "wilson_high": 0.33017702266551113,
+      "wilson_low": 0.20868060011609973,
+      "win_rate": 0.265,
+      "win_rate_seat0": 0.33,
+      "win_rate_seat1": 0.2,
+      "wins": 53
+    }
+  ],
+  "model": {
+    "agent_spec": "T:runs/50-loss-conditioned-dagger-s20260830/bc/bc.pt",
+    "checkpoint_label": null,
+    "checkpoint_path": "runs/50-loss-conditioned-dagger-s20260830/bc/bc.pt",
+    "file_sha256": "f44e959934767a67d043edd30ad66d2bd0c656b0b063113dd1dc4db2c3d870df",
+    "training_timesteps": null
+  },
+  "protocol": {
+    "base_seed": 20260701,
+    "description": "Paired checkpoint promotion schedule",
+    "gate_mode": "lower_bound",
+    "gates": {
+      "F": 0.52
+    },
+    "name": "fast-paired",
+    "num_games_per_matchup": 200,
+    "opponents": [
+      "F"
+    ],
+    "seed": 112260878,
+    "seed_round": 9,
+    "seed_suite": "promotion"
+  },
+  "result_sha256": "39840dd37dab0566c128695c1c1352acfaf51f38d38d39b3d908a9c0e2e5796a",
+  "schema_version": "catanatron-result-1",
+  "source_report": {
+    "path": "runs/50-loss-conditioned-dagger-s20260830/paired-promotion-f/candidate_report.json",
+    "sha256": "0a221fe3d358911c7ac15f56681aaff39710bc36a2d555e676b5e459c5743c79"
+  },
+  "status": "rejected",
+  "summary": {
+    "accounted_games": 200,
+    "all_games_accounted": true,
+    "best_win_rate": 0.265,
+    "completed_games": 200,
+    "error_games": 0,
+    "gates_passed_count": 0,
+    "gates_total": 1,
+    "mean_win_rate": 0.265,
+    "observed_games": 200,
+    "requested_games": 200,
+    "truncated_games": 0,
+    "weighted_score": 0.23684030005804987,
+    "worst_win_rate": 0.265
+  }
+}

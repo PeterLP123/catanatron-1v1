@@ -1,0 +1,86 @@
+{
+  "agent": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+  "colonist_1v1": true,
+  "game_evidence": {
+    "rows": 400,
+    "sha256": "e323cd86ecc74977df2e74f98c59f38a83fb67a90b94c62dffe1adbb39528112"
+  },
+  "matchups": [
+    {
+      "agent_code": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+      "avg_agent_vp": 10.6725,
+      "avg_opponent_vp": 13.9125,
+      "avg_turns": 95.84,
+      "avg_vp_diff": -3.24,
+      "completed_games": 400,
+      "draws": 0,
+      "duration_seconds": 63.5871455000015,
+      "error_games": 0,
+      "games": 400,
+      "games_seat0": 200,
+      "games_seat1": 200,
+      "gate": 0.52,
+      "gate_mode": "lower_bound",
+      "gate_value": 0.21944094819181173,
+      "losses": 296,
+      "observed_games": 400,
+      "opponent": "F",
+      "passed_gate": false,
+      "requested_games": 400,
+      "truncated_games": 0,
+      "vp_diff_seat0": -2.425,
+      "vp_diff_seat1": -4.055,
+      "wilson_high": 0.30512511929603503,
+      "wilson_low": 0.21944094819181173,
+      "win_rate": 0.26,
+      "win_rate_seat0": 0.305,
+      "win_rate_seat1": 0.215,
+      "wins": 104
+    }
+  ],
+  "model": {
+    "agent_spec": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+    "checkpoint_label": null,
+    "checkpoint_path": "runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+    "file_sha256": "32031687acee2636e60a2b2c9bf667580f7a884e5e223ddc230d131726381943",
+    "training_timesteps": null
+  },
+  "protocol": {
+    "base_seed": 20260701,
+    "description": "Paired checkpoint promotion schedule",
+    "gate_mode": "lower_bound",
+    "gates": {
+      "F": 0.52
+    },
+    "name": "fast-paired",
+    "num_games_per_matchup": 400,
+    "opponents": [
+      "F"
+    ],
+    "seed": 152260954,
+    "seed_round": 13,
+    "seed_suite": "promotion"
+  },
+  "result_sha256": "a4ad2113146b48e6a4573d19976db807af3dce0555b9422cae46f5a0896f6e57",
+  "schema_version": "catanatron-result-1",
+  "source_report": {
+    "path": "runs/53-equal-weight-model-soup-s101/paired-promotion-f/baseline_report.json",
+    "sha256": "70ca32a000b78fb690bc3467d9d4e5206a99b6d67041336d650ebd1ca1302616"
+  },
+  "status": "rejected",
+  "summary": {
+    "accounted_games": 400,
+    "all_games_accounted": true,
+    "best_win_rate": 0.26,
+    "completed_games": 400,
+    "error_games": 0,
+    "gates_passed_count": 0,
+    "gates_total": 1,
+    "mean_win_rate": 0.26,
+    "observed_games": 400,
+    "requested_games": 400,
+    "truncated_games": 0,
+    "weighted_score": 0.23972047409590586,
+    "worst_win_rate": 0.26
+  }
+}

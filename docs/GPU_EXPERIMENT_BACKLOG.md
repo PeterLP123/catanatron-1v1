@@ -153,11 +153,12 @@ evidence: the completed run must also improve F rate or F VP margin over its mat
 
 ## DAgger F pilot after anchor rejection
 
-The next bounded experiment is deliberately outside the PPO queue. It lets the raw
-hybrid-BC checkpoint visit its own failure states against `F`, records `F` labels and
-candidate scores without perturbing the student RNG, retrains the same hybrid objective,
-and evaluates on the promotion seed suite. Reconstruct the parent on a clean machine
-before launching DAgger:
+The bounded experiment outside the PPO queue is complete. It let the raw hybrid-BC
+checkpoint visit its own failure states against `F`, recorded `F` labels and candidate
+scores without perturbing the student RNG, retrained the same hybrid objective, and
+evaluated on the promotion schedule:
+
+On a clean machine, reconstruct the hybrid-BC parent first, or run both stages:
 
 ```bash
 scripts/run_hybrid_bc_parent.sh
@@ -165,8 +166,6 @@ scripts/run_hybrid_bc_parent.sh
 scripts/run_strong_bot_path.sh
 watch -n 10 scripts/watch_hybrid_bc_parent.sh runs/bc-hybrid-sweep/w0030
 ```
-
-The DAgger command itself is:
 
 ```bash
 scripts/gpu/run_dagger_f_pilot.sh \
@@ -178,29 +177,175 @@ scripts/gpu/run_dagger_f_pilot.sh \
 watch -n 10 scripts/gpu/watch_dagger_f_pilot.sh runs/28-dagger-f-s101
 ```
 
-The default pilot collects 100 alternating-seat games and gives augmentation rows a
-training-only weight of 4. Base and augmentation games are split independently, preserving
-the frozen base split. This is promotion diagnostics, not final evidence. Iteration 0 is
-kept: promotion-suite `F` rose from 20% / -3.18 VP to 36% / -1.80 VP and R/W/VP held at
-100%. Iteration 1 is discarded: `F` 34% / -2.18 VP, held-out regret 0.086 versus 0.080.
-Stop this DAgger line. Do not grow the corpus or retune the weight on the same promotion
-suite. `scripts/run_dagger_f_next.sh` remains only for a later student that actually
-beats iteration 0.
+The pilot collected 100 alternating-seat games and gave augmentation rows a training-only
+weight of 4. Base and augmentation games were split independently, preserving the frozen
+base split. In the later 200-game identical-schedule comparison, the child won 67 games
+against `F` versus 40 for the parent: paired +13.5 points with a 95% bootstrap interval of
+`[+6, +21]`, while VP difference improved by +1.425. Retain the DAgger child, but do not call
+it strong: 33.5% still fails the absolute `F` gate.
 
-Retention-gated PPO from that kept parent is rejected:
+The clean local reconstruction provides a separate reproducibility check. Its promotion card
+moved from 20% / -3.18 VP for the reconstructed parent to 36% / -1.80 VP for iteration 0,
+with R/W/VP at 100%. Its next 100-game iteration fell to 34% / -2.18 VP and held-out regret
+0.086 versus 0.080, so that continuation is discarded. `scripts/run_dagger_f_next.sh`
+remains only for a future student that actually beats iteration 0. Retention-gated PPO from
+the kept local parent is also rejected: `scripts/run_ppo_retain_dagger0.sh` stopped the
+`coef=10` recipe at 10k steps (`F=5%` on development), and the promotion card was
+R/W/VP/F = 86/70/72/2%. Do not retune that coefficient or start `30-strong-promoted`.
+
+The next treatment holds this data, hybrid objective, split, augmentation weight, and seed
+fixed and changes only `--architecture factored_policy_value`. It must beat the accepted
+DAgger MLP through the paired evaluator before collecting another iteration.
+
+That treatment is complete. The 691,710-parameter policy-only factored model lowered
+validation/test regret to 0.07724/0.07588, but the fresh paired result was only 56/200 versus
+54/200 for the 747,852-parameter MLP: +1 point with a 95% interval of
+`[-6.5, +8.5]`. Its absolute final battery retained R/W/VP at 100% but reached only 26%
+against `F`. Do not promote the architecture or spend more games resolving such a small
+observed effect. The next bounded experiment was DAgger iteration 1 from the retained MLP,
+with iteration 0's split frozen independently and a new locked paired schedule:
 
 ```bash
-scripts/run_ppo_retain_dagger0.sh
+scripts/gpu/run_dagger_f_iteration.sh \
+  runs/28-dagger-f-s101/bc/bc.pt \
+  data/hard_state_v2/F_F \
+  data/hard_state_v2/VP_F \
+  runs/31-dagger-f-iter1-s101 \
+  runs/28-dagger-f-s101/data/iteration-0000
 ```
 
-The `coef=10` recipe stopped at 10k steps (`F=5%` on 20 development games) and
-the promotion card was `R/W/VP/F = 86/70/72/2%`. Leave DAgger iteration 0 as the
-best policy. Do not retune the coefficient or start `30-strong-promoted`.
+Iteration 1 collected 100 new alternating-seat games (9,494 rows, zero truncations). Its
+scratch-trained child passed the fresh paired gameplay check against `F`: 59/200 wins versus
+44/200 for the retained parent, +7.5 points with a 95% interval of `[+0.49, +15]` and a
++0.395 VP-difference gain. It is nevertheless rejected by the precommitted two-part DAgger
+gate. On the exact same expanded validation/test plan, regret worsened from
+0.08229/0.08175 to 0.08474/0.08456. Its final R/W/VP/F battery was 100/98/94/22%.
+
+Preserve iteration 1's immutable data but keep the iteration-0 checkpoint. The next cheap
+treatment reuses those rows, initializes BC from the retained parent, and includes the
+unchanged model as epoch 0. The launcher now writes `matched-holdout.json` and stops before
+paired/final evaluation unless validation regret improves and test regret does not regress.
+Use `DAGGER_BC_INIT_CHECKPOINT` for this conservative update and allocate a fresh
+`DAGGER_EVAL_SEED_ROUND` only after the offline gate clears.
+
+The conservative update completed. Parent-as-epoch-0 selection chose epoch 10 and improved
+matched validation/test regret from 0.08229/0.08175 to 0.07147/0.07116; legal-choice
+accuracy rose by 3.11/2.96 points. Round 2 then favored the child 36.5% to 32.0% against
+`F`, with VP difference improving by +0.555, but the paired +4.5-point 95% interval was
+`[-4, +13.5]`. Its final R/W/VP/F battery was 100/100/100/22%.
+
+The independently seeded n=800 round-3 confirmation is complete. Its own interval was the
+predeclared decision statistic: the child won 259/800 games (32.375%) versus 223/800
+(27.875%), paired +4.5 points with 95% interval `[+0.375, +8.75]` and VP-difference gain
++0.64875. Retain `32031687acee` over `b366433c5c7`; this remains a relative promotion and
+does not pass the absolute `F >= 52%` gate.
+
+```bash
+PAIRED_CONFIRM_GAMES=800 PAIRED_CONFIRM_SEED_ROUND=3 \
+  scripts/gpu/run_paired_confirmation.sh \
+  runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt \
+  runs/28-dagger-f-s101/bc/bc.pt \
+  runs/33-dagger-f-iter1-warmstart-confirm-n800-r3
+```
+
+Iteration 2 then collected 100 new alternating-seat games (10,124 rows, zero truncations)
+and replayed all 70 frozen shards from the retained parent. The selected epoch lowered
+validation/test regret from 0.071140/0.070603 to 0.069442/0.068726. Round 4's n=200 point
+estimate favored the child by 3 points but crossed zero, so one n=1600 round-5 confirmation
+was fixed before launch. That larger round rejected the child: 30.0% versus 30.4375%,
+paired -0.4375 points with 95% interval `[-3.25, +2.4375]`, VP-difference delta -0.248125.
+Preserve iteration 2 but retain `32031687acee`.
+
+A final cheap replay enabled generic hard-state weights. The first attempt exposed and
+preserved a mixed-corpus `ACTION_TYPE` compatibility bug; the repaired loader derives the
+family from the canonical action index when needed. The clean restart regressed at every
+trained epoch, selected epoch 0, and failed the strict offline gate before consuming a new
+paired schedule. The existing factored checkpoint also loses to the retained MLP on the
+expanded 70-shard holdout by +0.00557/+0.00455 validation/test regret.
+
+Stop the uniform-imitation queue here. The exact 70-shard validation/test breakdown assigns
+`BUILD_ROAD` 4,079.58 total normalized regret over 18,881 choices at 46.63% accuracy; the
+next contributor, `MOVE_ROBBER`, has 1,658.34. Runs `40` and `41` completed the road-specific
+branch. The fresh audit contained 9,522 decisions from 100 games and was kept out of training.
+A frozen-base spatial residual improved aggregate and road regret on both audit halves, but
+round 6 was only 27.0% versus 25.5% against `F`: paired +1.5 points with 95% interval
+`[-4, +7]`. Reject checkpoint `d7b106bd603c`; do not extend that schedule or tune again on
+the consumed audit.
+
+Runs `42` and `43` completed the road teacher-information gate without training a model.
+The larger matched-state pilot rejected M800: round agreement 72.09% (gate 75%), exact
+agreement when both labels were roads 50% (gate 70%), worst p95 latency 2.05 s (gate 1.5 s),
+and M200-to-M800 agreement 67.44% (gate 75%). No search-labelled corpus, new road audit, or
+promotion schedule was authorized.
+
+Runs `44` and `45` then completed the declared `MOVE_ROBBER` contingency. A new 889-row audit
+from 100 games was frozen before architecture work. The narrow frozen-base robber residual
+passed all six matched-holdout/audit gates, but locked round 7 was 31.0% versus 32.5% for the
+retained parent: paired -1.5 points with 95% interval `[-6, +2.5]`. Reject checkpoint
+`dc58347a6642` and retain `32031687acee`.
+
+Do not move automatically to `MARITIME_TRADE` or allocate another uniform DAgger corpus. The
+CPU outcome branch is complete. Run `46` audited the exact 70-shard corpus and found 100% win
+coverage, 95.43% VP-margin coverage, 2,300 leakage-safe split groups, and no cross-logical-
+corpus collisions. Run `47` trained a value-only critic while keeping the run-32 policy frozen;
+it beat the public-VP baseline on all eight validation/test AUC, Brier, MAE, and RMSE gates.
+
+That authorized one fixed top-3 critic reranker. A 2026-08-31 code audit later found that the
+run-48/49 generic chance spectrum inspected hidden opponent resources for robber/Monopoly
+successors. The recorded 2.28 ms p95, 9.54% rerank rate, and locked 36.0% versus 30.0% result
+are therefore invalidated rather than merely inconclusive. Retain checkpoint `32031687acee`.
+The implementation now uses public-only successors with policy fallback, but no new GPU queue
+entry is justified without a fresh predeclared experiment.
+
+The required next outcome experiment had to add new information rather than search
+hyperparameters on consumed evidence: predeclare and collect fresh run-32-visited trajectories
+carrying the new native win and VP-margin fields, freeze their audit/split contract, and only
+then consider one new critic or advantage treatment. Run `50` exercised that contingency.
+
+Run `50-loss-conditioned-dagger-s20260830` completed as the single predeclared treatment for
+that branch. It collected 200 fresh alternating-seat games with retained checkpoint
+`32031687acee` against `F`, deterministic collection seed `20260830`, `F` labels, ten games
+per immutable shard, and complete native `RETURN`/`VICTORY_POINT_MARGIN_RETURN` fields.
+The run warm-starts from the retained checkpoint and preserves the exact base plus iteration
+0/1 corpora. Only the fresh run-50 TRAIN rows receive the fixed bounded multiplier
+`1 + max(0, -RETURN) + 0.5 * clip(max(0, -VP_MARGIN) / 10, 0, 1)`, on top of the unchanged
+augmentation weight `4`; validation and test remain unweighted. There is no hyperparameter
+sweep or unweighted control selected from the new holdout.
+
+The gate order is fixed before collection: both expanded validation/test mean-regret deltas
+must favor the candidate (`val < 0`, `test <= 0`) or gameplay is skipped. If that passes,
+allocate untouched promotion round `9` for 200 paired same-seat/same-seed games against `F`.
+Retain the candidate only if the paired 95% bootstrap lower bound is above zero and the final
+weak-opponent gates remain intact. A positive but inconclusive point estimate authorizes at
+most one independently seeded 800-game confirmation in round `10`; otherwise reject the
+treatment and keep run `32`.
+
+The result is rejected. The immutable corpus contains 19,247 rows from 61 wins and 139 losses.
+Expanded validation/test regret improved by -0.006707/-0.005894 and legal-choice accuracy by
++0.55/+0.72 points, so round 9 was correctly authorized. Gameplay nevertheless fell to
+26.5% versus 36.5% for run 32, paired -10 points with 95% interval `[-18.5, -2]`, and VP
+difference worsened by -0.74. The final R/W/VP/F point rates were 100/100/96/32%. Do not
+confirm or tune this treatment; checkpoint `32031687acee` remains the champion.
+Simple terminal-loss reweighting now joins uniform DAgger and action-family weighting as a
+measured plateau. Do not allocate another GPU or promotion round without a genuinely new
+counterfactual outcome/search signal and a fresh predeclared corpus.
+
+Three CPU-only alternatives then exercised that stopping condition without another GPU run.
+Run `51` routed only initial settlements/roads to the default value function; it improved the
+locked point estimate by +6.25 points, but round 11's interval `[0, +12.5]` failed the strict
+gate. Run `52` isolated a shared action-conditioned head and failed both matched holdouts, so
+it consumed no gameplay. Run `53` averaged aligned run-32/run-35 tensors at fixed 50/50;
+offline metrics improved, but round 13's +4-point interval `[-1, +9]` was inconclusive.
+Reject all exact treatments and do not tune routes, embeddings, or interpolation weights on
+their consumed evidence. Checkpoint `32031687acee` remains champion.
 
 ## Promotion and polish
 
-`30-strong-promoted` remains blocked until any complete candidate report has `F >= 10%` and
-retains `R >= 90%`, `W >= 70%`, and `VP >= 60%`:
+`30-strong-promoted` accepts a PPO resume checkpoint and remains blocked as an execution
+path. The supervised model clears the queue's early numeric signal, but every controlled PPO
+profile removed that signal by the first retention check; a PyTorch BC checkpoint is not a
+valid `--resume-checkpoint`. Do not reinterpret the numeric gate as permission to bypass the
+observed PPO failure:
 
 ```bash
 python examples/colonist_1v1_backlog.py start \

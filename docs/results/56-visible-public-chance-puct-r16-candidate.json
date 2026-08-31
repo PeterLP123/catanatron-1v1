@@ -1,0 +1,86 @@
+{
+  "agent": "Q:runs/56-visible-public-chance-puct-s20260830/visible-chance-puct.json",
+  "colonist_1v1": true,
+  "game_evidence": {
+    "rows": 400,
+    "sha256": "cfd095a1efacdd2a070e57da0a4a3152c4154e42dcfd60ec030aac6678242f8f"
+  },
+  "matchups": [
+    {
+      "agent_code": "Q:runs/56-visible-public-chance-puct-s20260830/visible-chance-puct.json",
+      "avg_agent_vp": 11.55,
+      "avg_opponent_vp": 13.6025,
+      "avg_turns": 97.06,
+      "avg_vp_diff": -2.0524999999999984,
+      "completed_games": 400,
+      "draws": 0,
+      "duration_seconds": 337.01132408301055,
+      "error_games": 0,
+      "games": 400,
+      "games_seat0": 200,
+      "games_seat1": 200,
+      "gate": 0.52,
+      "gate_mode": "lower_bound",
+      "gate_value": 0.30008703653936986,
+      "losses": 262,
+      "observed_games": 400,
+      "opponent": "F",
+      "passed_gate": false,
+      "requested_games": 400,
+      "truncated_games": 0,
+      "vp_diff_seat0": -1.6,
+      "vp_diff_seat1": -2.505,
+      "wilson_high": 0.39286188204653105,
+      "wilson_low": 0.30008703653936986,
+      "win_rate": 0.345,
+      "win_rate_seat0": 0.37,
+      "win_rate_seat1": 0.32,
+      "wins": 138
+    }
+  ],
+  "model": {
+    "agent_spec": "Q:runs/56-visible-public-chance-puct-s20260830/visible-chance-puct.json",
+    "checkpoint_label": null,
+    "checkpoint_path": "runs/56-visible-public-chance-puct-s20260830/visible-chance-puct.json",
+    "file_sha256": "7d22c13caa7f5446b6196fe14fc677f65010117871bd2ac14d93dea7af755f70",
+    "training_timesteps": null
+  },
+  "protocol": {
+    "base_seed": 20260701,
+    "description": "Paired checkpoint promotion schedule",
+    "gate_mode": "lower_bound",
+    "gates": {
+      "F": 0.52
+    },
+    "name": "fast-paired",
+    "num_games_per_matchup": 400,
+    "opponents": [
+      "F"
+    ],
+    "seed": 182261011,
+    "seed_round": 16,
+    "seed_suite": "promotion"
+  },
+  "result_sha256": "3c0b082b80d1b84ed2076794f3c546af6f8a743ce51633c99fed745e9573bffe",
+  "schema_version": "catanatron-result-1",
+  "source_report": {
+    "path": "runs/56-visible-public-chance-puct-s20260830/paired-promotion-f/candidate_report.json",
+    "sha256": "1212d6ec50cafda82591050c54c17f752d4fe3d6e77fa5fb14dbcd69efbea163"
+  },
+  "status": "rejected",
+  "summary": {
+    "accounted_games": 400,
+    "all_games_accounted": true,
+    "best_win_rate": 0.345,
+    "completed_games": 400,
+    "error_games": 0,
+    "gates_passed_count": 0,
+    "gates_total": 1,
+    "mean_win_rate": 0.345,
+    "observed_games": 400,
+    "requested_games": 400,
+    "truncated_games": 0,
+    "weighted_score": 0.3225435182696849,
+    "worst_win_rate": 0.345
+  }
+}

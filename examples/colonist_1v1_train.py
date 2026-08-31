@@ -1084,8 +1084,16 @@ def main(argv: list[str] | None = None) -> None:
         import torch
 
         tracker.phase("bc_warmstart", checkpoint=str(args.bc_checkpoint))
-        state = torch.load(str(args.bc_checkpoint), map_location="cpu")
+        state = torch.load(
+            str(args.bc_checkpoint), map_location="cpu", weights_only=True
+        )
         meta = load_bc_checkpoint_meta(args.bc_checkpoint.with_suffix(".meta.json"))
+        if meta is not None and meta.architecture != "mlp":
+            raise ValueError(
+                "PPO warm-start only supports flat MLP BC checkpoints; "
+                f"got architecture={meta.architecture!r}. Evaluate the structured "
+                "checkpoint directly or distil it into an MLP first."
+            )
         bc_schema = read_model_schema(checkpoint_schema_path(args.bc_checkpoint))
         if bc_schema is None and meta is not None and meta.model_schema:
             bc_schema = meta.model_schema

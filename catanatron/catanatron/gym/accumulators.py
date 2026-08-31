@@ -20,6 +20,7 @@ from catanatron.gym.envs.action_space import (
 from catanatron.gym.utils import (
     DISCOUNT_FACTOR,
     get_tournament_total_return,
+    get_victory_point_margin_total_return,
     get_victory_points_total_return,
     populate_matrices,
     simple_total_return,
@@ -37,6 +38,7 @@ class ReinforcementLearningAccumulator(GameAccumulator):
             "RETURN": simple_total_return,
             "TOURNAMENT_RETURN": get_tournament_total_return,
             "VICTORY_POINTS_RETURN": get_victory_points_total_return,
+            "VICTORY_POINT_MARGIN_RETURN": get_victory_point_margin_total_return,
         },
         score_candidates=False,
         value_fn_name="base_fn",

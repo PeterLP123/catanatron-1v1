@@ -1,0 +1,86 @@
+{
+  "agent": "T:runs/35-dagger-f-iter2-cpu-s101/bc/bc.pt",
+  "colonist_1v1": true,
+  "game_evidence": {
+    "rows": 1600,
+    "sha256": "cea95c96dea83ed8679204b3e7ea511218e48b321a397941cfb9bb4e908aa1c6"
+  },
+  "matchups": [
+    {
+      "agent_code": "T:runs/35-dagger-f-iter2-cpu-s101/bc/bc.pt",
+      "avg_agent_vp": 10.9025,
+      "avg_opponent_vp": 13.755,
+      "avg_turns": 95.89125,
+      "avg_vp_diff": -2.852500000000001,
+      "completed_games": 1600,
+      "draws": 0,
+      "duration_seconds": 233.0471169159864,
+      "error_games": 0,
+      "games": 1600,
+      "games_seat0": 800,
+      "games_seat1": 800,
+      "gate": 0.52,
+      "gate_mode": "lower_bound",
+      "gate_value": 0.2780462216201572,
+      "losses": 1120,
+      "observed_games": 1600,
+      "opponent": "F",
+      "passed_gate": false,
+      "requested_games": 1600,
+      "truncated_games": 0,
+      "vp_diff_seat0": -2.59375,
+      "vp_diff_seat1": -3.11125,
+      "wilson_high": 0.3229118779826962,
+      "wilson_low": 0.2780462216201572,
+      "win_rate": 0.3,
+      "win_rate_seat0": 0.32625,
+      "win_rate_seat1": 0.27375,
+      "wins": 480
+    }
+  ],
+  "model": {
+    "agent_spec": "T:runs/35-dagger-f-iter2-cpu-s101/bc/bc.pt",
+    "checkpoint_label": null,
+    "checkpoint_path": "runs/35-dagger-f-iter2-cpu-s101/bc/bc.pt",
+    "file_sha256": "7ec5729d2d474dafb9274dba4834f4a14aafa6b56b0ec11c88c2f91a82a22950",
+    "training_timesteps": null
+  },
+  "protocol": {
+    "base_seed": 20260701,
+    "description": "Paired checkpoint promotion schedule",
+    "gate_mode": "lower_bound",
+    "gates": {
+      "F": 0.52
+    },
+    "name": "fast-paired",
+    "num_games_per_matchup": 1600,
+    "opponents": [
+      "F"
+    ],
+    "seed": 72260802,
+    "seed_round": 5,
+    "seed_suite": "promotion"
+  },
+  "result_sha256": "a5b60b7c1fab2e46ab180399c6333c5aa0aaa689d16278c71bce548f9f0a82c2",
+  "schema_version": "catanatron-result-1",
+  "source_report": {
+    "path": "runs/36-dagger-f-iter2-confirm-n1600-r5/paired-promotion-f/candidate_report.json",
+    "sha256": "fd521d03f290141f16865356c4dfa7909688cae5af3253ab4d1c9258c27d4821"
+  },
+  "status": "rejected",
+  "summary": {
+    "accounted_games": 1600,
+    "all_games_accounted": true,
+    "best_win_rate": 0.3,
+    "completed_games": 1600,
+    "error_games": 0,
+    "gates_passed_count": 0,
+    "gates_total": 1,
+    "mean_win_rate": 0.3,
+    "observed_games": 1600,
+    "requested_games": 1600,
+    "truncated_games": 0,
+    "weighted_score": 0.2890231108100786,
+    "worst_win_rate": 0.3
+  }
+}

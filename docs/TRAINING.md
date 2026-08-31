@@ -165,6 +165,93 @@ python examples/colonist_1v1_bc.py \
   --out runs/bc-hybrid/bc.pt --run-dir runs/bc-hybrid
 ```
 
+### Factored policy/value treatment
+
+The legacy `mlp` remains the default and is the only BC layout that can warm-start
+the SB3 PPO actor. The structured treatment keeps the same stable vector schema but
+encodes edges, nodes, tiles, ports, and global state separately, fuses them into a
+state embedding, and scores learned action embeddings. It also supervises a win-value
+head from `RETURN` and a VP-margin head from `VICTORY_POINT_MARGIN_RETURN` when those
+trajectory columns are present:
+
+```bash
+python examples/colonist_1v1_bc.py \
+  --data-dir data/hard_state_v2/F_F data/hard_state_v2/VP_F \
+  --augmentation-data-dir data/distill --augmentation-weight 4 \
+  --architecture factored_policy_value --embedding-dim 128 \
+  --loss hybrid --hybrid-listwise-weight 0.003 \
+  --win-value-weight 0.25 --vp-margin-weight 0.05 \
+  --val-fraction 0.1 --test-fraction 0.1 \
+  --split-seed 101 --seed 101 --device auto \
+  --out runs/factored-bc/bc.pt --run-dir runs/factored-bc
+```
+
+Old shards remain valid: a missing value target is masked per shard rather than
+invented. New teacher trajectories record the true terminal VP margin. Structured
+checkpoints are directly playable as `T:runs/factored-bc/bc.pt`; PPO warm-start rejects
+them explicitly instead of partially copying incompatible tensors.
+
+### Action-conditioned policy treatment
+
+`action_conditioned` isolates action-head sharing from the grouped encoder and auxiliary
+value heads above. It keeps the ordinary global MLP state encoder, then scores learned action
+embeddings through a shared dot product. The full 332-logit output remains compatible with
+the stable action mask and normal `T:` checkpoint player; training may also request only a
+legal subset from the same module.
+
+```bash
+python examples/colonist_1v1_bc.py \
+  --data-dir data/hard_state_v2/F_F data/hard_state_v2/VP_F \
+  --architecture action_conditioned --hidden 512 512 --embedding-dim 128 \
+  --loss hybrid --hybrid-listwise-weight 0.003 \
+  --listwise-temperature 0.02 --epochs 10 \
+  --val-fraction 0.1 --test-fraction 0.1 \
+  --split-seed 101 --seed 101 --device auto \
+  --out runs/action-conditioned/bc.pt --run-dir runs/action-conditioned
+```
+
+### Spatial action-family residual treatments
+
+`spatial_edge_residual` is a narrow representation treatment for the 72 `BUILD_ROAD`
+actions. It loads an MLP parent into a byte-compatible base, starts with exactly identical
+logits, and—when `--freeze-base-policy` is set—trains only a shared topology-aware residual.
+The residual sees each edge's ownership, both endpoint-building states, mean adjacent-tile
+state, global context, and learned edge identity. Non-road logits cannot change.
+
+```bash
+python examples/colonist_1v1_bc.py \
+  --data-dir data/hard_state_v2/F_F data/hard_state_v2/VP_F \
+  --augmentation-data-dir \
+    runs/28-dagger-f-s101/data/iteration-0000 \
+    runs/31-dagger-f-iter1-s101/data/iteration-0001 \
+    runs/34-dagger-f-iter2-s101/data/iteration-0002 \
+  --architecture spatial_edge_residual --embedding-dim 64 \
+  --init-checkpoint runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt \
+  --freeze-base-policy --augmentation-weight 4 \
+  --loss hybrid --hybrid-listwise-weight 0.003 \
+  --listwise-temperature 0.02 --epochs 5 \
+  --val-fraction 0.1 --test-fraction 0.1 \
+  --split-seed 101 --seed 101 --device auto \
+  --expected-dataset-sha256 bebe41e8b6e1b1f188ab7a106a7205706b99dccb79849aa518eba616f1850d69 \
+  --expected-shards 70 --expected-train-rows 497532 \
+  --expected-val-rows 62417 --expected-test-rows 62990 \
+  --out runs/spatial-road/bc.pt --run-dir runs/spatial-road
+```
+
+The expected-data arguments are optional hard gates, but promotion work should set them:
+training aborts before the first optimizer step if the shard set or frozen split drifts.
+Both corpus options may be repeated; repeated occurrences accumulate. Never include a fresh
+audit corpus in this command, epoch selection, or hyperparameter tuning.
+
+`spatial_robber_residual` applies the same conservative contract to the 57 `MOVE_ROBBER`
+actions. It starts byte-identical to the MLP parent and, with `--freeze-base-policy`, trains
+only a destination-aware head using tile state, whether a victim is present, global context,
+and learned tile identity. Use the same command above with
+`--architecture spatial_robber_residual`. Non-robber logits cannot change. Runs `41` and `45`
+show why this remains an experimental mechanism rather than a promotion shortcut: each narrow
+head improved matched and fresh-audit imitation metrics, but neither beat the retained parent
+on its locked paired gameplay round.
+
 | Loss | Behavior | Data requirement |
 |---|---|---|
 | `cross_entropy` | Legacy CE over all 332 actions | Legacy or v2 data; compatibility only |
@@ -175,8 +262,15 @@ python examples/colonist_1v1_bc.py \
 
 `--device auto` selects CUDA, then MPS, then CPU. Python, NumPy, and Torch receive the same
 seed. `--hard-states` changes training weights only; validation/test remain unweighted.
+When a distillation shard omits the redundant `ACTION_TYPE` column, the loader derives the
+same action family from the canonical full-space `ACTION` index. A shard lacking both usable
+representations is rejected explicitly.
 The saved checkpoint is the best validation epoch, selected by `mean_regret` when candidate
-values exist and otherwise by validation loss.
+values exist and otherwise by validation loss. For a conservative DAgger update,
+`--init-checkpoint <parent.pt>` first verifies the parent schema and architecture, evaluates
+the unchanged parent as epoch 0 on the new matched split, and saves a trained epoch only when
+it strictly improves the selection metric. This prevents a replay update from silently
+replacing a stronger parent merely because training completed.
 
 BC outputs:
 
@@ -195,6 +289,29 @@ python examples/colonist_1v1_backlog.py start 20-hard-bc-actual-s101 \
   --bc-checkpoint "$PWD/runs/bc-listwise/bc.pt" \
   --bc-baseline-checkpoint "$PWD/runs/bc-legal/bc.pt"
 ```
+
+After appending a DAgger corpus, do not compare the candidate with the parent's old metadata:
+the two checkpoints were measured on different row sets. Re-evaluate both on one rebuilt
+plan instead:
+
+```bash
+python examples/colonist_1v1_bc_compare.py \
+  --candidate runs/dagger-child/bc.pt \
+  --baseline runs/dagger-parent/bc.pt \
+  --data-dir data/hard_state_v2/F_F data/hard_state_v2/VP_F \
+  --augmentation-data-dir \
+    data/distill/iteration-0000 \
+    data/distill/iteration-0001 \
+  --split-seed 101 \
+  --output runs/dagger-child/matched-holdout.json
+```
+
+The report binds both checkpoint hashes and the exact shard-set hash, evaluates identical
+validation/test rows with legal-masked CE, and defines every delta as candidate minus
+baseline. Negative `mean_regret` deltas are improvements. Each checkpoint split also records
+per-action-family row count, legal-choice accuracy, mean regret, and total regret. For
+distillation shards, the family is derived from the canonical teacher-action index, so the
+breakdown covers the same target the policy was trained to imitate.
 
 ## 3. Collect DAgger/search-distillation data
 
@@ -221,6 +338,31 @@ python examples/colonist_1v1_distill.py \
   --output data/distill --verify
 ```
 
+For an action-family teacher gate, restrict collection before the expensive teacher is called:
+
+```bash
+python examples/colonist_1v1_distill.py \
+  --student T:runs/bc-hybrid/bc.pt \
+  --teacher M:200:False:base_fn --teacher-seed-round 0 \
+  --opponent F --iteration 0 --games 8 \
+  --only-when-legal-action-type BUILD_ROAD \
+  --no-candidate-scores --output data/road-labels-r0
+
+python examples/colonist_1v1_teacher_label_compare.py \
+  --reference data/road-labels-r0/iteration-0000 \
+  --candidate data/road-labels-r1/iteration-0000 \
+  --minimum-rows 100 --minimum-agreement 0.75 \
+  --minimum-both-road-agreement 0.70 --maximum-p95-ms 1500 \
+  --output runs/road-teacher-stability.json
+```
+
+The comparator refuses trajectory drift: matched rows must have the same game/decision keys,
+state hashes, legal sets, and behavior actions. Collection manifests report decisions seen,
+recorded, filtered, forced, and teacher latency (mean/p50/p95/max). A different
+`--teacher-seed-round` changes only the teacher RNG stream, leaving the behavior trajectory
+fixed. Passing such a comparison authorizes only the next predeclared step; it is not model
+evidence.
+
 Teachers are limited to `F` or fixed-simulation MCTS. Wall-clock MCTS teachers are rejected
 because machine load would change labels. This CLI implements trustworthy data collection,
 not an automatic large expert-iteration training loop.
@@ -229,12 +371,17 @@ The BC trainer accepts verified distillation roots directly. `TEACHER_ACTION` be
 supervised target and `CANDIDATE_SCORES` becomes the listwise value vector. Keep the original
 corpus under `--data-dir` and add DAgger data with `--augmentation-data-dir`; the two corpora
 are split independently so appending an iteration cannot move frozen base games across
-train/validation/test boundaries:
+train/validation/test boundaries. For multiple iterations, pass each `iteration-*` directory
+as a separate argument. Each argument gets its own deterministic whole-game split, preventing
+a new iteration from reshuffling earlier DAgger holdouts:
 
 ```bash
 python examples/colonist_1v1_bc.py \
   --data-dir data/hard_state_v2/F_F data/hard_state_v2/VP_F \
-  --augmentation-data-dir data/distill --augmentation-weight 4 \
+  --augmentation-data-dir \
+    data/distill/iteration-0000 \
+    data/distill/iteration-0001 \
+  --augmentation-weight 4 \
   --loss hybrid --hybrid-listwise-weight 0.003 \
   --listwise-temperature 0.02 --epochs 10 \
   --val-fraction 0.1 --test-fraction 0.1 \
@@ -246,9 +393,174 @@ If the hybrid-BC parent checkpoint or frozen `hard_state_v2` corpora are missing
 them with `scripts/run_hybrid_bc_parent.sh` (or run both stages with
 `scripts/run_strong_bot_path.sh`). For the frozen 100-game pilot itself, use
 `scripts/gpu/run_dagger_f_pilot.sh` and monitor it with
-`scripts/gpu/watch_dagger_f_pilot.sh`. Continue a kept student with
-`scripts/run_dagger_f_next.sh`. Non-finite candidate placeholders from teachers that
-cannot score legal actions are excluded from listwise loss instead of being treated as data.
+`scripts/gpu/watch_dagger_f_pilot.sh`. `scripts/run_dagger_f_next.sh` remains the portable
+launcher for a future student that clears its frozen parent. Later bounded iterations use
+`scripts/gpu/run_dagger_f_iteration.sh`; pass prior `iteration-*` directories in order. The
+launcher verifies every immutable root, trains with each split independently, and evaluates
+the child and parent on the same expanded holdout. It proceeds to a numbered fresh
+promotion/final round only when validation regret improves and test regret does not regress;
+otherwise it records the failed offline gate and leaves the locked gameplay schedule unused.
+Set `DAGGER_BC_INIT_CHECKPOINT` to make the update conservative and
+`DAGGER_EVAL_SEED_ROUND` to allocate the next unused locked round. `DAGGER_DEVICE` accepts
+`auto`, `cpu`, `cuda`, or `mps` (default `cuda`); `DAGGER_BC_HARD_STATES=1` enables the
+training-only family weights and defaults to `0`. Both settings, the resolved accelerator,
+and the hashes of the training, comparison, paired-evaluation, and launcher sources are
+written to `run_record.txt`. Non-finite candidate placeholders from teachers that cannot
+score legal actions are excluded from listwise loss instead of being treated as data.
+
+Use `scripts/gpu/run_paired_confirmation.sh` only after fixing the candidate, parent, game
+count, and unused seed round. It changes no model or data and applies the paired interval to
+that round alone; do not pool rounds or extend a run after seeing its interval.
+
+### Audit outcome targets and train a separate critic
+
+Distillation rows now record `RETURN` and `VICTORY_POINT_MARGIN_RETURN` after each completed
+game. For older immutable DAgger shards, the audit can recover the student's win target from
+the game manifest; base teacher corpora can recover VP margin by pairing the two seat views of
+the same game. Unknown or truncated outcomes stay masked rather than being invented.
+
+Audit coverage, whole-game split groups, collisions, class balance, and public-VP baselines
+before training anything. Arguments supplied within one `--corpus` occurrence are one logical
+corpus and split together; repeat `--corpus` for independently split DAgger iterations:
+
+```bash
+python examples/colonist_1v1_value_target_audit.py \
+  --corpus data/hard_state_v2/F_F data/hard_state_v2/VP_F \
+  --corpus runs/28-dagger-f-s101/data/iteration-0000 \
+  --corpus runs/31-dagger-f-iter1-s101/data/iteration-0001 \
+  --corpus runs/34-dagger-f-iter2-s101/data/iteration-0002 \
+  --minimum-win-row-coverage 1.0 \
+  --minimum-margin-row-coverage 0.95 \
+  --minimum-split-groups 2000 --minimum-minority-fraction 0.30 \
+  --output runs/outcome-audit/outcome-target-audit.json
+```
+
+The value-only critic uses the same frozen split plan and trains no policy parameter. Bind a
+real run to the audited dataset hash, shard count, and split-row counts; the CLI exits nonzero
+unless both validation and test beat the public-VP baselines on every declared gate:
+
+```bash
+python examples/colonist_1v1_outcome_critic.py \
+  --corpus data/hard_state_v2/F_F data/hard_state_v2/VP_F \
+  --corpus runs/28-dagger-f-s101/data/iteration-0000 \
+  --corpus runs/31-dagger-f-iter1-s101/data/iteration-0001 \
+  --corpus runs/34-dagger-f-iter2-s101/data/iteration-0002 \
+  --embedding-dim 128 --batch-size 2048 --epochs 5 \
+  --lr 0.0003 --margin-weight 0.05 --split-seed 101 --seed 101 \
+  --expected-dataset-sha256 <audit-dataset-sha256> \
+  --expected-shards 70 --expected-train-rows 497532 \
+  --expected-val-rows 62417 --expected-test-rows 62990 \
+  --out runs/outcome-critic/critic.pt --run-dir runs/outcome-critic
+```
+
+A passing critic may authorize one fixed policy-use design, not a promotion claim. The
+implemented `C:` player keeps both the policy and critic frozen, takes the policy's top-k
+legal actions, evaluates public-only successors one ply forward, and changes the top action
+only when the critic's expected win probability clears the configured improvement threshold.
+It falls back to the frozen policy for action sets outside the public chance boundary:
+
+```bash
+python examples/colonist_1v1_build_reranker.py \
+  --policy runs/retained/bc.pt --critic runs/outcome-critic/critic.pt \
+  --top-k 3 --minimum-win-probability-improvement 0.05 \
+  --output runs/outcome-reranker/reranker.json
+
+python examples/colonist_1v1_reranker_diagnostic.py \
+  --agent-manifest runs/outcome-reranker/reranker.json \
+  --games 20 --seed 20260805 --minimum-choice-decisions 200 \
+  --minimum-rerank-rate 0.01 --maximum-rerank-rate 0.35 \
+  --maximum-p95-ms 100 \
+  --output runs/outcome-reranker/operational-diagnostic.json
+```
+
+The portable manifest hashes both weight files and all metadata/schema sidecars. Operational
+latency and intervention gates must pass before a fresh paired schedule is allocated. Runs
+Runs `48`–`49` used an older generic chance spectrum that a 2026-08-31 audit found could
+inspect hidden robber/Monopoly outcomes. Their round-8 +6-point estimate and interval are
+invalidated, not corrected-wrapper evidence. The hidden-safe wrapper has not been rerun;
+do not tune it on the consumed round.
+
+### Visible-state same-turn PUCT
+
+The `N:` player provides a small policy-guided search without inheriting the engine's
+omniscient chance spectra. It searches only deterministic same-turn action sets and falls
+back to the frozen policy if any legal root action is `ROLL`, `BUY_DEVELOPMENT_CARD`,
+`MOVE_ROBBER`, or `PLAY_MONOPOLY`. Opponent turns are leaves. The `public_f` leaf retains
+public board, production, hand-count, development-count, and played-card terms while
+removing resource-composition hand synergy for every player.
+
+```bash
+python examples/colonist_1v1_build_visible_puct.py \
+  --policy runs/retained/bc.pt --critic runs/outcome-critic/critic.pt \
+  --leaf-evaluator public_f --num-simulations 32 \
+  --c-puct 1.4142135623730951 \
+  --output runs/visible-puct/visible-puct.json
+
+python examples/colonist_1v1_visible_puct_diagnostic.py \
+  --agent-manifest runs/visible-puct/visible-puct.json \
+  --games 20 --seed 2026083055 --minimum-search-decisions 200 \
+  --minimum-multi-ply-decisions 20 --minimum-change-rate 0.01 \
+  --maximum-change-rate 0.50 --maximum-p95-ms 100 \
+  --output runs/visible-puct/operational-diagnostic.json
+```
+
+Run 55 retained the fixed public-F treatment after a fresh 400-game paired promotion against
+`F`; do not tune its search constants on promotion round 15. Its absolute `F >= 52%` gate is
+still unmet, so this is a measured relative improvement, not an absolutely strong bot.
+
+The experimental `Q:` player keeps run 55's policy, public-F leaf, 32 simulations, and
+sqrt(2) PUCT constant, but adds custom public-only chance nodes for `ROLL` and
+`BUY_DEVELOPMENT_CARD`. Dice use the public dice controller/history. Development-card outcomes
+use the deck plus opponents' hidden unplayed-card counts as a single unseen pool, so neither
+the distribution nor public successor projections depend on the hidden deck/opponent
+partition. `MOVE_ROBBER`, `PLAY_MONOPOLY`, and opponent turns still fall back or terminate.
+
+```bash
+python examples/colonist_1v1_build_visible_chance_puct.py \
+  --parent-manifest runs/55-visible-public-f-puct-s20260830/visible-puct.json \
+  --expected-parent-sha256 36e4707e76215605f4ba55334f074e3afda4ee7d3d2c8f8cfb89b03a5ac5c3f3 \
+  --output runs/visible-chance-puct/visible-chance-puct.json
+
+python examples/colonist_1v1_visible_chance_puct_diagnostic.py \
+  --agent-manifest runs/visible-chance-puct/visible-chance-puct.json \
+  --games 20 --seed 2026083056 --minimum-search-decisions 1200 \
+  --minimum-multi-ply-decisions 600 --minimum-chance-actions 100 \
+  --minimum-chance-outcomes 300 --minimum-change-rate 0.01 \
+  --maximum-change-rate 0.50 --maximum-p95-ms 100 \
+  --output runs/visible-chance-puct/operational-diagnostic.json
+```
+
+Run 56 passed all 12 operational gates and its development screen, but locked promotion round
+16 was inconclusive: 34.50% versus 32.25% against `F`, paired +2.25 points with 95% interval
+`[-0.25, +4.75]`. The exact treatment is rejected without tuning; skip its final battery and
+retain run 55.
+
+### Loss-conditioned DAgger weighting
+
+Fresh student-visited corpora with complete native terminal targets can receive a bounded,
+training-only correction weight:
+
+```bash
+python examples/colonist_1v1_bc.py \
+  --data-dir data/hard_state_v2/F_F data/hard_state_v2/VP_F \
+  --augmentation-data-dir runs/dagger-0/data/iteration-0000 \
+  --outcome-weighted-augmentation-data-dir runs/fresh-outcomes/data/iteration-0001 \
+  --augmentation-weight 4 \
+  --outcome-loss-bonus 1.0 \
+  --outcome-vp-deficit-bonus 0.5 \
+  --outcome-vp-deficit-scale 10 \
+  --init-checkpoint runs/retained/bc.pt \
+  --loss hybrid --epochs 10 --test-fraction 0.1 \
+  --out runs/loss-conditioned/bc.pt --run-dir runs/loss-conditioned
+```
+
+Only the explicitly named fresh corpus is reweighted; base and ordinary augmentation rows
+retain their existing weights, and validation/test rows are always unweighted. The trainer
+rejects missing, inconsistent, or non-finite `RETURN` and
+`VICTORY_POINT_MARGIN_RETURN` fields before optimization and records the target/weight
+distribution in checkpoint and run metadata. Run `50` validated the mechanism but rejected
+the treatment: offline regret improved on both expanded holdouts, while locked gameplay fell
+10 paired points versus run 32. Do not tune the coefficients on that consumed corpus or round.
 
 ## 4. Train MaskablePPO
 
@@ -371,6 +683,23 @@ silently improving the win rate. Reports contain per-game seat, seed, schedule i
 outcome, turns, and VP. Pair candidate and baseline reports only on shared seat/seed schedules;
 the evaluation library can bootstrap a paired matchup interval, while the reward-backlog gate
 uses a deterministic weighted mean of paired per-game outcome deltas.
+
+For checkpoint promotion, generate both reports and the paired bootstrap artifact in one
+command. The process exits nonzero unless every opponent's lower confidence bound clears
+`--minimum-delta`:
+
+```bash
+python examples/colonist_1v1_paired_evaluate.py \
+  --candidate T:runs/dagger-bc/bc.pt \
+  --baseline T:runs/bc-hybrid/bc.pt \
+  --opponents R W VP F --num-games 200 \
+  --seed-suite promotion --minimum-delta 0 \
+  --output-dir runs/dagger-bc/paired-promotion
+```
+
+The default `--seed-round 0` preserves the original suite. After its result has influenced
+the next experiment, advance to `--seed-round 1` (then 2, and so on) to obtain a disjoint,
+still publishable promotion/final schedule without inventing an untracked manual seed.
 
 ## 6. Publish evidence and retain artifacts
 

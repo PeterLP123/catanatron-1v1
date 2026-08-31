@@ -12,6 +12,7 @@ from catanatron.colonist_1v1_eval import (
     DEFAULT_BENCHMARK_GATES,
     EvaluationReport,
     confidence_gate_passed,
+    resolve_eval_seed,
     summarize_report,
     wilson_score_interval,
 )
@@ -32,6 +33,21 @@ def validate_publishable_report(report: EvaluationReport) -> None:
         raise ValueError(
             "Publishable evidence must use a locked promotion/final seed suite"
         )
+    seed_round = protocol.get("seed_round", 0)
+    if (
+        isinstance(seed_round, bool)
+        or not isinstance(seed_round, int)
+        or seed_round < 0
+    ):
+        raise ValueError("Locked protocol has an invalid seed round")
+    if "seed" in protocol and "base_seed" in protocol:
+        expected_seed = resolve_eval_seed(
+            int(protocol["base_seed"]),
+            suite=protocol["seed_suite"],
+            seed_round=seed_round,
+        )
+        if int(protocol["seed"]) != expected_seed:
+            raise ValueError("Locked protocol seed disagrees with its suite and round")
     model_meta = report.meta.get("model", {})
     model_hash = model_meta.get("file_sha256")
     if not isinstance(model_hash, str) or len(model_hash) != 64:

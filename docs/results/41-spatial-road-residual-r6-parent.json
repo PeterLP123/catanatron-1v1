@@ -1,0 +1,86 @@
+{
+  "agent": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+  "colonist_1v1": true,
+  "game_evidence": {
+    "rows": 200,
+    "sha256": "dde1dac30813b5791a7ebef37c90ab152378a7e688f16f8c7bf982bdf9187794"
+  },
+  "matchups": [
+    {
+      "agent_code": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+      "avg_agent_vp": 11.105,
+      "avg_opponent_vp": 14.09,
+      "avg_turns": 98.955,
+      "avg_vp_diff": -2.9849999999999994,
+      "completed_games": 200,
+      "draws": 0,
+      "duration_seconds": 31.401820791012142,
+      "error_games": 0,
+      "games": 200,
+      "games_seat0": 100,
+      "games_seat1": 100,
+      "gate": 0.52,
+      "gate_mode": "lower_bound",
+      "gate_value": 0.19960402982802747,
+      "losses": 149,
+      "observed_games": 200,
+      "opponent": "F",
+      "passed_gate": false,
+      "requested_games": 200,
+      "truncated_games": 0,
+      "vp_diff_seat0": -2.77,
+      "vp_diff_seat1": -3.2,
+      "wilson_high": 0.3196305130719498,
+      "wilson_low": 0.19960402982802747,
+      "win_rate": 0.255,
+      "win_rate_seat0": 0.25,
+      "win_rate_seat1": 0.26,
+      "wins": 51
+    }
+  ],
+  "model": {
+    "agent_spec": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+    "checkpoint_label": null,
+    "checkpoint_path": "runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+    "file_sha256": "32031687acee2636e60a2b2c9bf667580f7a884e5e223ddc230d131726381943",
+    "training_timesteps": null
+  },
+  "protocol": {
+    "base_seed": 20260701,
+    "description": "Paired checkpoint promotion schedule",
+    "gate_mode": "lower_bound",
+    "gates": {
+      "F": 0.52
+    },
+    "name": "fast-paired",
+    "num_games_per_matchup": 200,
+    "opponents": [
+      "F"
+    ],
+    "seed": 82260821,
+    "seed_round": 6,
+    "seed_suite": "promotion"
+  },
+  "result_sha256": "9a09ae54bb4d121aee280fb2ff9b2fde4c3d9efe5fa8d68c3cab1f8983a7f8be",
+  "schema_version": "catanatron-result-1",
+  "source_report": {
+    "path": "runs/41-spatial-road-residual-cpu-s101/paired-promotion-f/baseline_report.json",
+    "sha256": "26f92e4383f47a5f0015d0ebfbb79cbc8c22f062ea7e538cd8fb5d33b04b860d"
+  },
+  "status": "rejected",
+  "summary": {
+    "accounted_games": 200,
+    "all_games_accounted": true,
+    "best_win_rate": 0.255,
+    "completed_games": 200,
+    "error_games": 0,
+    "gates_passed_count": 0,
+    "gates_total": 1,
+    "mean_win_rate": 0.255,
+    "observed_games": 200,
+    "requested_games": 200,
+    "truncated_games": 0,
+    "weighted_score": 0.22730201491401375,
+    "worst_win_rate": 0.255
+  }
+}

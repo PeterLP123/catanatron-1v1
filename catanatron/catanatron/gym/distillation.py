@@ -17,6 +17,7 @@ import json
 import math
 import os
 import random
+import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -25,11 +26,17 @@ from typing import Any, Iterator, Mapping, Sequence
 import numpy as np
 
 from catanatron.features import create_sample
+from catanatron.gym.bc_training import (
+    VP_MARGIN_TARGET_COLUMN,
+    WIN_VALUE_TARGET_COLUMN,
+)
 from catanatron.gym.envs.action_space import to_action_space
 from catanatron.gym.model_schema import canonical_hash
 from catanatron.gym.provenance import sha256_file
+from catanatron.models.enums import ActionType
 from catanatron.models.player import Color, Player
 from catanatron.players.value import ValueFunctionPlayer, get_value_fn
+from catanatron.state_functions import get_actual_victory_points
 
 DISTILLATION_FORMAT_VERSION = 1
 PLAYER_COLORS = (Color.BLUE, Color.RED)
@@ -81,6 +88,8 @@ class DistillationConfig:
     include_forced: bool = False
     score_f_candidates: bool = True
     shard_games: int = 10
+    teacher_seed_round: int = 0
+    record_legal_action_types: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.iteration < 0:
@@ -89,12 +98,21 @@ class DistillationConfig:
             raise ValueError("games must be at least 1")
         if self.shard_games < 1:
             raise ValueError("shard_games must be at least 1")
+        if self.teacher_seed_round < 0:
+            raise ValueError("teacher_seed_round must be non-negative")
+        unknown_action_types = sorted(
+            set(self.record_legal_action_types) - set(ActionType.__members__)
+        )
+        if unknown_action_types:
+            raise ValueError(
+                f"Unknown record_legal_action_types: {unknown_action_types}"
+            )
         validate_teacher_spec(self.teacher_spec)
 
 
 def _checkpoint_path_from_spec(spec: str) -> str | None:
     code, separator, value = spec.partition(":")
-    if code not in {"L", "T"}:
+    if code not in {"C", "L", "N", "O", "Q", "T"}:
         return None
     if not separator or not value:
         raise ValueError(f"{code} player spec requires a checkpoint path")
@@ -227,6 +245,28 @@ class DistillationDecisionRecorder:
         self.model_schema = dict(model_schema)
         self.student = student
         self.teacher = teacher
+        self.decisions_seen = 0
+        self.decisions_recorded = 0
+        self.filtered_decisions = 0
+        self.forced_decisions = 0
+        self.teacher_latencies_ms: list[float] = []
+
+    def collection_stats(self) -> dict[str, Any]:
+        latencies = np.asarray(self.teacher_latencies_ms, dtype=float)
+        latency_stats = {
+            "count": int(len(latencies)),
+            "mean_ms": float(latencies.mean()) if len(latencies) else None,
+            "p50_ms": float(np.quantile(latencies, 0.50)) if len(latencies) else None,
+            "p95_ms": float(np.quantile(latencies, 0.95)) if len(latencies) else None,
+            "max_ms": float(latencies.max()) if len(latencies) else None,
+        }
+        return {
+            "decisions_seen": self.decisions_seen,
+            "decisions_recorded": self.decisions_recorded,
+            "filtered_decisions": self.filtered_decisions,
+            "forced_decisions": self.forced_decisions,
+            "teacher_latency": latency_stats,
+        }
 
     def decide_and_label(
         self,
@@ -246,6 +286,25 @@ class DistillationDecisionRecorder:
         if behavior.color != teacher.color:
             raise ValueError("behavior and teacher must label the same color")
 
+        self.decisions_seen += 1
+        forced = len(actions) == 1 and not self.config.include_forced
+        matches_action_filter = not self.config.record_legal_action_types or any(
+            action.action_type.name in self.config.record_legal_action_types
+            for action in actions
+        )
+        if forced:
+            self.forced_decisions += 1
+        elif not matches_action_filter:
+            self.filtered_decisions += 1
+
+        if forced or not matches_action_filter:
+            behavior_action = behavior.decide(game, actions)
+            if behavior_action not in actions:
+                raise ValueError(
+                    f"Behavior policy returned an illegal action: {behavior_action}"
+                )
+            return behavior_action, None
+
         sample = create_sample(
             game,
             behavior.color,
@@ -254,13 +313,19 @@ class DistillationDecisionRecorder:
         if self.config.human_visible_obs:
             _human_visible_sample(sample, game, behavior.color)
 
+        teacher_seed_namespace = (
+            "teacher-decision"
+            if self.config.teacher_seed_round == 0
+            else f"teacher-decision-round-{self.config.teacher_seed_round}"
+        )
         decision_seed = derive_seed(
-            "teacher-decision",
+            teacher_seed_namespace,
             base_seed=self.config.base_seed,
             iteration=self.config.iteration,
             game_index=game_index,
             decision_index=decision_index,
         )
+        teacher_started = time.perf_counter()
         with isolated_random_seed(decision_seed):
             teacher_action = teacher.decide(game, actions)
             candidate_scores = (
@@ -268,6 +333,9 @@ class DistillationDecisionRecorder:
                 if self.config.score_f_candidates
                 else None
             )
+        self.teacher_latencies_ms.append(
+            (time.perf_counter() - teacher_started) * 1000.0
+        )
         if teacher_action not in actions:
             raise ValueError(f"Teacher returned an illegal action: {teacher_action}")
 
@@ -278,9 +346,6 @@ class DistillationDecisionRecorder:
             raise ValueError(
                 f"Behavior policy returned an illegal action: {behavior_action}"
             )
-
-        if len(actions) == 1 and not self.config.include_forced:
-            return behavior_action, None
 
         legal_indices = [_action_index(action, context="legal") for action in actions]
         teacher_index = _action_index(teacher_action, context="teacher")
@@ -311,6 +376,7 @@ class DistillationDecisionRecorder:
             "GAME_SEED": game_seed,
             "DECISION_INDEX": decision_index,
             "DECISION_SEED": decision_seed,
+            "TEACHER_SEED_ROUND": self.config.teacher_seed_round,
             "STATE_HASH": state_hash,
             "TURN": int(game.state.num_turns),
             "SEAT": seat,
@@ -333,6 +399,7 @@ class DistillationDecisionRecorder:
             "RULES_HASH": self.model_schema["rules_hash"],
         }
         row.update({f"F_{key}": value for key, value in sample.items()})
+        self.decisions_recorded += 1
         return behavior_action, row
 
 
@@ -397,8 +464,22 @@ class DistillationDatasetWriter:
         student_color: Color,
         winner: Color | None,
         truncated: bool,
+        student_return: float | None = None,
+        student_vp_margin_return: float | None = None,
+        student_final_vp: float | None = None,
+        opponent_final_vp: float | None = None,
     ) -> None:
-        self._rows.extend(dict(row) for row in rows)
+        win_target = float(student_return) if student_return is not None else math.nan
+        margin_target = (
+            float(student_vp_margin_return)
+            if student_vp_margin_return is not None
+            else math.nan
+        )
+        for source in rows:
+            row = dict(source)
+            row[WIN_VALUE_TARGET_COLUMN] = win_target
+            row[VP_MARGIN_TARGET_COLUMN] = margin_target
+            self._rows.append(row)
         self._games_buffered += 1
         self._games.append(
             {
@@ -408,6 +489,20 @@ class DistillationDatasetWriter:
                 "winner": winner.name if winner is not None else None,
                 "truncated": bool(truncated),
                 "rows": len(rows),
+                "student_return": (
+                    float(student_return) if student_return is not None else None
+                ),
+                "student_vp_margin_return": (
+                    float(student_vp_margin_return)
+                    if student_vp_margin_return is not None
+                    else None
+                ),
+                "student_final_vp": (
+                    float(student_final_vp) if student_final_vp is not None else None
+                ),
+                "opponent_final_vp": (
+                    float(opponent_final_vp) if opponent_final_vp is not None else None
+                ),
             }
         )
         if self._games_buffered >= self.shard_games:
@@ -701,6 +796,28 @@ def run_distillation_iteration(
                 return action
 
             winner = game.play(decide_fn=decide)
+            opponent_color = next(
+                color for color in PLAYER_COLORS if color != student_color
+            )
+            student_final_vp = float(
+                get_actual_victory_points(game.state, student_color)
+            )
+            opponent_final_vp = float(
+                get_actual_victory_points(game.state, opponent_color)
+            )
+            if winner is None:
+                student_return = None
+                student_vp_margin_return = None
+            else:
+                from catanatron.gym.utils import (
+                    get_victory_point_margin_total_return,
+                    simple_total_return,
+                )
+
+                student_return = simple_total_return(game, student_color)
+                student_vp_margin_return = get_victory_point_margin_total_return(
+                    game, student_color
+                )
             writer.add_game(
                 rows,
                 game_index=game_index,
@@ -708,5 +825,10 @@ def run_distillation_iteration(
                 student_color=student_color,
                 winner=winner,
                 truncated=winner is None,
+                student_return=student_return,
+                student_vp_margin_return=student_vp_margin_return,
+                student_final_vp=student_final_vp,
+                opponent_final_vp=opponent_final_vp,
             )
+    writer.metadata["collection_stats"] = recorder.collection_stats()
     return writer.finalize()

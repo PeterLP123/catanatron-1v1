@@ -11,6 +11,7 @@ from catanatron.colonist_1v1_eval import (
     GameOutcome,
     MatchupResult,
     compare_paired_matchups,
+    compare_paired_reports,
     confidence_gate_passed,
     resolve_eval_seed,
     run_benchmark,
@@ -175,6 +176,27 @@ def test_seed_suites_are_distinct_deterministic_and_recorded():
     assert final.meta["protocol"]["seed_suite"] == "final"
     assert dev.meta["protocol"]["seed"] != final.meta["protocol"]["seed"]
 
+    final_round_1 = run_benchmark(
+        "F",
+        opponents=(),
+        protocol="fast",
+        eval_kind="final_benchmark",
+        seed_round=1,
+    )
+    assert final_round_1.meta["protocol"]["seed_suite"] == "final"
+    assert final_round_1.meta["protocol"]["seed_round"] == 1
+    assert final_round_1.meta["protocol"]["seed"] == resolve_eval_seed(
+        DEFAULT_EVAL_SEED, suite="final", seed_round=1
+    )
+    assert final_round_1.meta["protocol"]["seed"] != final.meta["protocol"]["seed"]
+
+
+def test_seed_round_rejects_invalid_values():
+    with pytest.raises(ValueError, match="non-negative integer"):
+        resolve_eval_seed(DEFAULT_EVAL_SEED, suite="final", seed_round=-1)
+    with pytest.raises(ValueError, match="non-negative integer"):
+        resolve_eval_seed(DEFAULT_EVAL_SEED, suite="final", seed_round=True)
+
 
 def test_report_round_trip_and_legacy_reader_preserve_accounting(tmp_path):
     legacy = {
@@ -251,6 +273,59 @@ def test_paired_bootstrap_and_confidence_gate_are_deterministic():
     )
     with pytest.raises(ValueError, match="Duplicate paired schedule_id"):
         compare_paired_matchups(duplicate, duplicate, resamples=10)
+
+
+def test_paired_gate_requires_lower_bound_strictly_above_threshold():
+    tied = _matchup(
+        game_results=[
+            GameOutcome(i, 0, True, "completed", "win", seed=100 + i) for i in range(6)
+        ]
+    )
+
+    comparison = compare_paired_matchups(tied, tied, resamples=100, threshold=0.0)
+
+    assert comparison.confidence_low == 0.0
+    assert comparison.passed_gate is False
+
+
+def test_paired_report_compares_all_matchups_and_checks_protocol():
+    candidate_matchup = _matchup(
+        game_results=[
+            GameOutcome(i, 0, True, "completed", "win", seed=100 + i) for i in range(6)
+        ]
+    )
+    baseline_matchup = _matchup(
+        game_results=[
+            GameOutcome(i, 0, True, "completed", "loss", seed=100 + i) for i in range(6)
+        ]
+    )
+    protocol = {
+        "opponents": ["F"],
+        "num_games_per_matchup": 6,
+        "seed": 100,
+        "base_seed": 7,
+        "seed_suite": "promotion",
+    }
+    candidate = EvaluationReport(
+        agent="T:candidate.pt",
+        matchups=[candidate_matchup],
+        meta={"both_seats": True, "protocol": protocol},
+    )
+    baseline = EvaluationReport(
+        agent="T:baseline.pt",
+        matchups=[baseline_matchup],
+        meta={"both_seats": True, "protocol": dict(protocol)},
+    )
+
+    report = compare_paired_reports(candidate, baseline, resamples=100, seed=9)
+
+    assert report.all_gates_passed is True
+    assert report.comparisons[0].score.mean_delta == 1.0
+    assert report.to_dict()["comparisons"][0]["win_rate_delta"] == 1.0
+
+    baseline.meta["protocol"]["seed_suite"] = "final"
+    with pytest.raises(ValueError, match="seed_suite"):
+        compare_paired_reports(candidate, baseline, resamples=10)
 
 
 def test_evaluation_restores_python_numpy_and_torch_rng(monkeypatch):

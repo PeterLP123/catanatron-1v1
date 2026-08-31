@@ -8,6 +8,7 @@ metrics.
 
 from __future__ import annotations
 
+import os
 import random
 import hashlib
 import json
@@ -37,8 +38,30 @@ LEGAL_ACTIONS_COLUMN = "LEGAL_ACTIONS"
 CANDIDATE_VALUES_COLUMN = "CANDIDATE_VALUES"
 DISTILLATION_TARGET_COLUMN = "TEACHER_ACTION"
 DISTILLATION_CANDIDATE_VALUES_COLUMN = "CANDIDATE_SCORES"
+WIN_VALUE_TARGET_COLUMN = "RETURN"
+VP_MARGIN_TARGET_COLUMN = "VICTORY_POINT_MARGIN_RETURN"
+VALUE_TARGET_COLUMNS = (WIN_VALUE_TARGET_COLUMN, VP_MARGIN_TARGET_COLUMN)
 
 LossName = Literal["cross_entropy", "legal_ce", "listwise", "hybrid"]
+
+
+def action_type_indices_from_full_actions(action_indices: Sequence[int]) -> np.ndarray:
+    """Derive BASE 1v1 action-family indices from versioned full action indices."""
+    from catanatron.gym.envs.action_space import get_action_type_array
+    from catanatron.models.player import Color
+
+    try:
+        indices = np.asarray(action_indices, dtype=np.int64)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Full action indices must be integers") from exc
+    if indices.ndim != 1:
+        raise ValueError("Full action indices must be a one-dimensional sequence")
+    mapping = np.asarray(
+        get_action_type_array((Color.BLUE, Color.RED), "BASE"), dtype=np.int64
+    )
+    if bool(((indices < 0) | (indices >= len(mapping))).any()):
+        raise ValueError("Full action index is outside the BASE 1v1 action schema")
+    return mapping[indices]
 
 
 def hash_parquet_shards(
@@ -79,6 +102,11 @@ def seed_everything(seed: int, *, deterministic: bool = True) -> None:
 
     import torch
 
+    if deterministic:
+        # CUDA matrix multiplications otherwise warn and remain nondeterministic
+        # despite ``use_deterministic_algorithms``. This must be set before the
+        # first cuBLAS operation; doing it here avoids launcher-only behavior.
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
@@ -283,6 +311,7 @@ class ParquetDatasetPlan:
     path_groups: dict[Path, frozenset[str]]
     path_target_columns: dict[Path, str]
     path_candidate_value_columns: dict[Path, str]
+    path_value_target_columns: dict[Path, frozenset[str]]
 
     def groups_for(self, split: str) -> frozenset[str]:
         if split == "train":
@@ -321,6 +350,7 @@ def combine_parquet_dataset_plans(
     path_groups: dict[Path, frozenset[str]] = {}
     path_target_columns: dict[Path, str] = {}
     path_candidate_value_columns: dict[Path, str] = {}
+    path_value_target_columns: dict[Path, frozenset[str]] = {}
 
     for plan in plans:
         if plan.feature_columns != first.feature_columns:
@@ -345,6 +375,7 @@ def combine_parquet_dataset_plans(
         path_groups.update(plan.path_groups)
         path_target_columns.update(plan.path_target_columns)
         path_candidate_value_columns.update(plan.path_candidate_value_columns)
+        path_value_target_columns.update(plan.path_value_target_columns)
 
     return ParquetDatasetPlan(
         paths=tuple(paths),
@@ -358,6 +389,7 @@ def combine_parquet_dataset_plans(
         path_groups=path_groups,
         path_target_columns=path_target_columns,
         path_candidate_value_columns=path_candidate_value_columns,
+        path_value_target_columns=path_value_target_columns,
     )
 
 
@@ -388,6 +420,7 @@ def inspect_parquet_dataset(
     path_groups: dict[Path, frozenset[str]] = {}
     path_target_columns: dict[Path, str] = {}
     path_candidate_value_columns: dict[Path, str] = {}
+    path_value_target_columns: dict[Path, frozenset[str]] = {}
     rows_by_group: Counter[str] = Counter()
     common_columns: set[str] | None = None
 
@@ -426,6 +459,9 @@ def inspect_parquet_dataset(
         )
         if candidate_column is not None:
             path_candidate_value_columns[path] = candidate_column
+        path_value_target_columns[path] = frozenset(
+            column for column in VALUE_TARGET_COLUMNS if column in columns
+        )
 
         logical_columns = set(columns)
         logical_columns.add("ACTION")
@@ -476,7 +512,36 @@ def inspect_parquet_dataset(
         path_groups=path_groups,
         path_target_columns=path_target_columns,
         path_candidate_value_columns=path_candidate_value_columns,
+        path_value_target_columns=path_value_target_columns,
     )
+
+
+def inspect_parquet_corpora(
+    corpora: Sequence[Sequence[Path]],
+    *,
+    val_fraction: float,
+    test_fraction: float = 0.0,
+    seed: int = 0,
+) -> ParquetDatasetPlan:
+    """Split each corpus independently, then combine the frozen plans.
+
+    Each DAgger iteration must remain a separate corpus. Appending games to one
+    aggregate before splitting would reshuffle earlier train/validation/test
+    assignments even when the split seed is unchanged.
+    """
+    corpus_paths = tuple(tuple(Path(path) for path in paths) for paths in corpora)
+    if not corpus_paths:
+        raise ValueError("At least one Parquet corpus is required")
+    plans = tuple(
+        inspect_parquet_dataset(
+            paths,
+            val_fraction=val_fraction,
+            test_fraction=test_fraction,
+            seed=seed,
+        )
+        for paths in corpus_paths
+    )
+    return plans[0] if len(plans) == 1 else combine_parquet_dataset_plans(plans)
 
 
 def _identity(value):
@@ -496,6 +561,9 @@ class ParquetDecisionBatches(_IterableDatasetBase):
         shuffle: bool = False,
         sample_weight_fn: Optional[Callable[[Any], np.ndarray]] = None,
         path_weights: Optional[Mapping[Path, float]] = None,
+        path_sample_weight_fns: Optional[
+            Mapping[Path, Callable[[Any], np.ndarray]]
+        ] = None,
     ):
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
@@ -510,6 +578,10 @@ class ParquetDecisionBatches(_IterableDatasetBase):
         self.sample_weight_fn = sample_weight_fn
         self.path_weights = {
             Path(path): float(weight) for path, weight in (path_weights or {}).items()
+        }
+        self.path_sample_weight_fns = {
+            Path(path): weight_fn
+            for path, weight_fn in (path_sample_weight_fns or {}).items()
         }
         if any(
             not math.isfinite(weight) or weight <= 0
@@ -546,6 +618,7 @@ class ParquetDecisionBatches(_IterableDatasetBase):
             target_column = self.plan.path_target_columns[path]
             candidate_column = self.plan.path_candidate_value_columns.get(path)
             read_columns = [*self.plan.feature_columns, target_column]
+            read_columns.extend(sorted(self.plan.path_value_target_columns[path]))
             read_columns.extend(
                 c
                 for c in (
@@ -578,13 +651,29 @@ class ParquetDecisionBatches(_IterableDatasetBase):
                 continue
             if frame.empty:
                 continue
-            if self.sample_weight_fn is None:
-                weights = np.ones(len(frame), dtype=np.float32)
-            else:
-                weights = np.asarray(self.sample_weight_fn(frame), dtype=np.float32)
-                keep = weights > 0
-                frame = frame.iloc[np.flatnonzero(keep)]
-                weights = weights[keep]
+            weights = np.ones(len(frame), dtype=np.float32)
+            weight_fns = tuple(
+                fn
+                for fn in (
+                    self.sample_weight_fn,
+                    self.path_sample_weight_fns.get(path),
+                )
+                if fn is not None
+            )
+            for weight_fn in weight_fns:
+                factors = np.asarray(weight_fn(frame), dtype=np.float32)
+                if factors.shape != (len(frame),):
+                    raise ValueError(
+                        "Sample weight function must return one weight per row"
+                    )
+                if not bool(np.isfinite(factors).all()):
+                    raise ValueError("Sample weights must be finite")
+                if bool((factors < 0).any()):
+                    raise ValueError("Sample weights must be non-negative")
+                weights *= factors
+            keep = weights > 0
+            frame = frame.iloc[np.flatnonzero(keep)]
+            weights = weights[keep]
             weights *= self.path_weights.get(path, 1.0)
             if frame.empty:
                 continue
@@ -607,6 +696,21 @@ class ParquetDecisionBatches(_IterableDatasetBase):
                 legal_indices, legal_mask, values, value_mask = padded_decision_columns(
                     legal, candidates
                 )
+
+                def value_target(column: str):
+                    if column not in chunk:
+                        return (
+                            torch.zeros(len(chunk), dtype=torch.float32),
+                            torch.zeros(len(chunk), dtype=torch.bool),
+                        )
+                    target = torch.from_numpy(chunk[column].to_numpy(np.float32).copy())
+                    mask = torch.isfinite(target)
+                    return torch.where(mask, target, torch.zeros_like(target)), mask
+
+                win_targets, win_mask = value_target(WIN_VALUE_TARGET_COLUMN)
+                vp_margin_targets, vp_margin_mask = value_target(
+                    VP_MARGIN_TARGET_COLUMN
+                )
                 yield {
                     "features": torch.from_numpy(
                         chunk.loc[:, self.plan.feature_columns]
@@ -619,7 +723,9 @@ class ParquetDecisionBatches(_IterableDatasetBase):
                     "action_types": (
                         chunk["ACTION_TYPE"].to_numpy()
                         if "ACTION_TYPE" in chunk
-                        else None
+                        else action_type_indices_from_full_actions(
+                            chunk["ACTION"].to_numpy()
+                        )
                     ),
                     "num_legal": (
                         chunk[NUM_LEGAL_COLUMN].to_numpy()
@@ -633,6 +739,10 @@ class ParquetDecisionBatches(_IterableDatasetBase):
                     "legal_mask": legal_mask,
                     "candidate_values": values,
                     "candidate_mask": value_mask,
+                    "win_value_targets": win_targets,
+                    "win_value_mask": win_mask,
+                    "vp_margin_targets": vp_margin_targets,
+                    "vp_margin_mask": vp_margin_mask,
                     "sample_weights": torch.from_numpy(weights[positions].copy()),
                 }
 
@@ -661,6 +771,8 @@ class DecisionMetricAccumulator:
         self.topk_hits = Counter()
         self.family_correct: Counter[int] = Counter()
         self.family_rows: Counter[int] = Counter()
+        self.family_regret_sum: Counter[int] = Counter()
+        self.family_regret_rows: Counter[int] = Counter()
         self.regret_sum = 0.0
         self.regret_rows = 0
 
@@ -711,10 +823,13 @@ class DecisionMetricAccumulator:
                     values = np.asarray(candidates, dtype=float)
                     span = float(values.max() - values.min())
                     chosen = float(values[int(order[0])])
-                    self.regret_sum += (
-                        (float(values.max()) - chosen) / span if span > 0 else 0.0
-                    )
+                    regret = (float(values.max()) - chosen) / span if span > 0 else 0.0
+                    self.regret_sum += regret
                     self.regret_rows += 1
+                    if action_types is not None:
+                        family = int(action_types[i])
+                        self.family_regret_sum[family] += regret
+                        self.family_regret_rows[family] += 1
 
     def compute(self) -> dict[str, Any]:
         result: dict[str, Any] = {"rows": self.rows}
@@ -730,6 +845,27 @@ class DecisionMetricAccumulator:
         if self.family_rows:
             result["per_action_family_accuracy"] = {
                 str(family): self.family_correct[family] / rows
+                for family, rows in self.family_rows.items()
+            }
+            from catanatron.gym.envs.action_space import ACTION_TYPES
+
+            result["per_action_family"] = {
+                str(family): {
+                    "name": (
+                        ACTION_TYPES[family].name
+                        if 0 <= family < len(ACTION_TYPES)
+                        else f"UNKNOWN_{family}"
+                    ),
+                    "rows": rows,
+                    "accuracy": self.family_correct[family] / rows,
+                    "regret_rows": self.family_regret_rows[family],
+                    "mean_regret": (
+                        self.family_regret_sum[family] / self.family_regret_rows[family]
+                        if self.family_regret_rows[family]
+                        else None
+                    ),
+                    "total_regret": self.family_regret_sum[family],
+                }
                 for family, rows in self.family_rows.items()
             }
         if self.regret_rows:

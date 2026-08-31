@@ -1,0 +1,86 @@
+{
+  "agent": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+  "colonist_1v1": true,
+  "game_evidence": {
+    "rows": 200,
+    "sha256": "1366a0639b7052d9617b8da222b6a76077bb2335d70ef04e91ca36b65df7f1b1"
+  },
+  "matchups": [
+    {
+      "agent_code": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+      "avg_agent_vp": 11.325,
+      "avg_opponent_vp": 13.45,
+      "avg_turns": 96.905,
+      "avg_vp_diff": -2.125,
+      "completed_games": 200,
+      "draws": 0,
+      "duration_seconds": 30.427682875000755,
+      "error_games": 0,
+      "games": 200,
+      "games_seat0": 100,
+      "games_seat1": 100,
+      "gate": 0.52,
+      "gate_mode": "lower_bound",
+      "gate_value": 0.3014041621876483,
+      "losses": 127,
+      "observed_games": 200,
+      "opponent": "F",
+      "passed_gate": false,
+      "requested_games": 200,
+      "truncated_games": 0,
+      "vp_diff_seat0": -1.68,
+      "vp_diff_seat1": -2.57,
+      "wilson_high": 0.4336842594102984,
+      "wilson_low": 0.3014041621876483,
+      "win_rate": 0.365,
+      "win_rate_seat0": 0.38,
+      "win_rate_seat1": 0.35,
+      "wins": 73
+    }
+  ],
+  "model": {
+    "agent_spec": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+    "checkpoint_label": null,
+    "checkpoint_path": "runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+    "file_sha256": "32031687acee2636e60a2b2c9bf667580f7a884e5e223ddc230d131726381943",
+    "training_timesteps": null
+  },
+  "protocol": {
+    "base_seed": 20260701,
+    "description": "Paired checkpoint promotion schedule",
+    "gate_mode": "lower_bound",
+    "gates": {
+      "F": 0.52
+    },
+    "name": "fast-paired",
+    "num_games_per_matchup": 200,
+    "opponents": [
+      "F"
+    ],
+    "seed": 112260878,
+    "seed_round": 9,
+    "seed_suite": "promotion"
+  },
+  "result_sha256": "5b675a8c73a3edfc1985461c12f2648355b550c6b9521cde70c5d6d0e146e4fc",
+  "schema_version": "catanatron-result-1",
+  "source_report": {
+    "path": "runs/50-loss-conditioned-dagger-s20260830/paired-promotion-f/baseline_report.json",
+    "sha256": "5036b6b4aaab456fb8522054acabbabf644736edcc7642d0544ae13f3a36c3c3"
+  },
+  "status": "rejected",
+  "summary": {
+    "accounted_games": 200,
+    "all_games_accounted": true,
+    "best_win_rate": 0.365,
+    "completed_games": 200,
+    "error_games": 0,
+    "gates_passed_count": 0,
+    "gates_total": 1,
+    "mean_win_rate": 0.365,
+    "observed_games": 200,
+    "requested_games": 200,
+    "truncated_games": 0,
+    "weighted_score": 0.33320208109382415,
+    "worst_win_rate": 0.365
+  }
+}

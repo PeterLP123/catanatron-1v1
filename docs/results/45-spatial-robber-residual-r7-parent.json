@@ -1,0 +1,86 @@
+{
+  "agent": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+  "colonist_1v1": true,
+  "game_evidence": {
+    "rows": 200,
+    "sha256": "0808141b135a8e74511f52b5d70504b57e93bd3274c0465e50a60dfc0f4acbbe"
+  },
+  "matchups": [
+    {
+      "agent_code": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+      "avg_agent_vp": 11.295,
+      "avg_opponent_vp": 13.895,
+      "avg_turns": 96.275,
+      "avg_vp_diff": -2.5999999999999996,
+      "completed_games": 200,
+      "draws": 0,
+      "duration_seconds": 27.910244083002908,
+      "error_games": 0,
+      "games": 200,
+      "games_seat0": 100,
+      "games_seat1": 100,
+      "gate": 0.52,
+      "gate_mode": "lower_bound",
+      "gate_value": 0.2639146705018621,
+      "losses": 135,
+      "observed_games": 200,
+      "opponent": "F",
+      "passed_gate": false,
+      "requested_games": 200,
+      "truncated_games": 0,
+      "vp_diff_seat0": -2.01,
+      "vp_diff_seat1": -3.19,
+      "wilson_high": 0.39268143156955027,
+      "wilson_low": 0.2639146705018621,
+      "win_rate": 0.325,
+      "win_rate_seat0": 0.37,
+      "win_rate_seat1": 0.28,
+      "wins": 65
+    }
+  ],
+  "model": {
+    "agent_spec": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+    "checkpoint_label": null,
+    "checkpoint_path": "runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+    "file_sha256": "32031687acee2636e60a2b2c9bf667580f7a884e5e223ddc230d131726381943",
+    "training_timesteps": null
+  },
+  "protocol": {
+    "base_seed": 20260701,
+    "description": "Paired checkpoint promotion schedule",
+    "gate_mode": "lower_bound",
+    "gates": {
+      "F": 0.52
+    },
+    "name": "fast-paired",
+    "num_games_per_matchup": 200,
+    "opponents": [
+      "F"
+    ],
+    "seed": 92260840,
+    "seed_round": 7,
+    "seed_suite": "promotion"
+  },
+  "result_sha256": "c0c4ac3a168f7add070a1601fc166dc696112c94cef319b6c0d6ef01d5bdcd33",
+  "schema_version": "catanatron-result-1",
+  "source_report": {
+    "path": "runs/45-spatial-robber-residual-cpu-s101/paired-promotion-f/baseline_report.json",
+    "sha256": "69d382267f0b3c6a8129d226ea878dbd4844680d3769936ea9c8e7bd50ff340d"
+  },
+  "status": "rejected",
+  "summary": {
+    "accounted_games": 200,
+    "all_games_accounted": true,
+    "best_win_rate": 0.325,
+    "completed_games": 200,
+    "error_games": 0,
+    "gates_passed_count": 0,
+    "gates_total": 1,
+    "mean_win_rate": 0.325,
+    "observed_games": 200,
+    "requested_games": 200,
+    "truncated_games": 0,
+    "weighted_score": 0.2944573352509311,
+    "worst_win_rate": 0.325
+  }
+}

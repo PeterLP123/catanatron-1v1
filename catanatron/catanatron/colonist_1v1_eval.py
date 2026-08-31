@@ -52,6 +52,7 @@ EVAL_SEED_SUITE_OFFSETS: dict[str, int] = {
     "promotion": 2_000_006,
     "final": 3_000_009,
 }
+EVAL_SEED_ROUND_STRIDE = 10_000_019
 EVAL_KIND_SEED_SUITES: dict[str, str] = {
     "manual": "manual",
     "mid_training": "dev",
@@ -134,12 +135,21 @@ def resolve_eval_seed(
     base_seed: int = DEFAULT_EVAL_SEED,
     *,
     suite: str = "manual",
+    seed_round: int = 0,
 ) -> int:
-    """Resolve a stable, disjoint base seed for dev/promotion/final evidence."""
+    """Resolve a stable, disjoint seed for one evaluation suite and round."""
     if suite not in EVAL_SEED_SUITE_OFFSETS:
         valid = ", ".join(sorted(EVAL_SEED_SUITE_OFFSETS))
         raise ValueError(f"Unknown evaluation seed suite {suite!r}; expected: {valid}")
-    return base_seed + EVAL_SEED_SUITE_OFFSETS[suite]
+    if (
+        isinstance(seed_round, bool)
+        or not isinstance(seed_round, int)
+        or seed_round < 0
+    ):
+        raise ValueError("evaluation seed round must be a non-negative integer")
+    return (
+        base_seed + EVAL_SEED_SUITE_OFFSETS[suite] + seed_round * EVAL_SEED_ROUND_STRIDE
+    )
 
 
 def sha256_file(path: Optional[Path]) -> Optional[str]:
@@ -168,7 +178,7 @@ def checkpoint_path_from_agent(agent_spec: str) -> Optional[Path]:
     if ":" not in agent_spec:
         return None
     code, path = agent_spec.split(":", 1)
-    if code not in {"L", "T"} or not path:
+    if code not in {"C", "L", "N", "O", "Q", "T"} or not path:
         return None
     return Path(path)
 
@@ -460,7 +470,7 @@ def compare_paired_matchups(
         confidence=confidence,
         resamples=resamples,
         threshold=threshold,
-        passed_gate=bool(shared) and low >= threshold,
+        passed_gate=bool(shared) and low > threshold,
     )
 
 
@@ -505,6 +515,150 @@ class EvaluationReport:
     @classmethod
     def read_json(cls, path: Path) -> "EvaluationReport":
         return cls.from_dict(json.loads(path.read_text(encoding="utf-8")))
+
+
+@dataclass(frozen=True)
+class PairedMatchupComparison:
+    """One opponent's paired candidate-minus-baseline evidence."""
+
+    opponent: str
+    candidate_win_rate: float
+    baseline_win_rate: float
+    candidate_vp_diff: float
+    baseline_vp_diff: float
+    score: PairedComparison
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "opponent": self.opponent,
+            "candidate_win_rate": self.candidate_win_rate,
+            "baseline_win_rate": self.baseline_win_rate,
+            "win_rate_delta": self.candidate_win_rate - self.baseline_win_rate,
+            "candidate_vp_diff": self.candidate_vp_diff,
+            "baseline_vp_diff": self.baseline_vp_diff,
+            "vp_diff_delta": self.candidate_vp_diff - self.baseline_vp_diff,
+            **self.score.to_dict(),
+        }
+
+
+@dataclass
+class PairedEvaluationReport:
+    """Auditable comparison of two agents on an identical game schedule."""
+
+    candidate_agent: str
+    baseline_agent: str
+    comparisons: list[PairedMatchupComparison] = field(default_factory=list)
+    all_gates_passed: bool = False
+    meta: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": "1.0",
+            "candidate_agent": self.candidate_agent,
+            "baseline_agent": self.baseline_agent,
+            "all_gates_passed": self.all_gates_passed,
+            "meta": self.meta,
+            "comparisons": [item.to_dict() for item in self.comparisons],
+        }
+
+    def write_json(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.to_dict(), indent=2) + "\n", encoding="utf-8")
+
+
+def compare_paired_reports(
+    candidate: EvaluationReport,
+    baseline: EvaluationReport,
+    *,
+    confidence: float = 0.95,
+    resamples: int = 5_000,
+    seed: int = DEFAULT_EVAL_SEED,
+    threshold: float = 0.0,
+) -> PairedEvaluationReport:
+    """Compare every matchup in two reports recorded on the same schedule.
+
+    Per-game schedule IDs are the definitive pairing contract.  Shared protocol
+    metadata is also checked when present so an apparently paired comparison
+    cannot silently mix seat policy, seed suite, or game-count settings.
+    """
+    if candidate.colonist_1v1 != baseline.colonist_1v1:
+        raise ValueError("Paired reports must use the same game rules")
+
+    for key in ("both_seats",):
+        left = candidate.meta.get(key)
+        right = baseline.meta.get(key)
+        if left is not None and right is not None and left != right:
+            raise ValueError(f"Paired report metadata differs for {key}")
+    candidate_protocol = candidate.meta.get("protocol", {})
+    baseline_protocol = baseline.meta.get("protocol", {})
+    for key in (
+        "opponents",
+        "num_games_per_matchup",
+        "seed",
+        "base_seed",
+        "seed_suite",
+    ):
+        left = candidate_protocol.get(key)
+        right = baseline_protocol.get(key)
+        if left is not None and right is not None and left != right:
+            raise ValueError(f"Paired protocol metadata differs for {key}")
+
+    def by_opponent(report: EvaluationReport) -> dict[str, MatchupResult]:
+        indexed: dict[str, MatchupResult] = {}
+        for matchup in report.matchups:
+            if matchup.opponent in indexed:
+                raise ValueError(
+                    f"Duplicate opponent in paired report: {matchup.opponent}"
+                )
+            indexed[matchup.opponent] = matchup
+        return indexed
+
+    candidate_matchups = by_opponent(candidate)
+    baseline_matchups = by_opponent(baseline)
+    if candidate_matchups.keys() != baseline_matchups.keys():
+        raise ValueError("Paired reports must contain the same opponents")
+
+    comparisons: list[PairedMatchupComparison] = []
+    for offset, opponent in enumerate(candidate_matchups):
+        candidate_matchup = candidate_matchups[opponent]
+        baseline_matchup = baseline_matchups[opponent]
+        score = compare_paired_matchups(
+            candidate_matchup,
+            baseline_matchup,
+            confidence=confidence,
+            resamples=resamples,
+            seed=seed + offset,
+            threshold=threshold,
+        )
+        comparisons.append(
+            PairedMatchupComparison(
+                opponent=opponent,
+                candidate_win_rate=candidate_matchup.win_rate,
+                baseline_win_rate=baseline_matchup.win_rate,
+                candidate_vp_diff=candidate_matchup.avg_vp_diff,
+                baseline_vp_diff=baseline_matchup.avg_vp_diff,
+                score=score,
+            )
+        )
+
+    return PairedEvaluationReport(
+        candidate_agent=candidate.agent,
+        baseline_agent=baseline.agent,
+        comparisons=comparisons,
+        all_gates_passed=bool(comparisons)
+        and all(item.score.passed_gate for item in comparisons),
+        meta={
+            "created_at": utc_now_iso(),
+            "confidence": confidence,
+            "resamples": resamples,
+            "bootstrap_seed": seed,
+            "minimum_score_delta": threshold,
+            "gate_operator": "confidence_low_strictly_greater_than_threshold",
+            "protocol": candidate_protocol,
+            "candidate_model": candidate.meta.get("model", {}),
+            "baseline_model": baseline.meta.get("model", {}),
+        },
+    )
 
 
 @dataclass
@@ -917,6 +1071,7 @@ def build_eval_meta(
     command: Optional[Sequence[str]] = None,
     both_seats: bool = True,
     seed_suite: str = "manual",
+    seed_round: int = 0,
     base_seed: Optional[int] = None,
     gate_mode: Literal["point", "lower_bound"] = "point",
     gates: Optional[Mapping[str, float]] = None,
@@ -939,6 +1094,7 @@ def build_eval_meta(
             "seed": protocol.seed,
             "base_seed": protocol.seed if base_seed is None else base_seed,
             "seed_suite": seed_suite,
+            "seed_round": seed_round,
             "gate_mode": gate_mode,
         },
         "model": {
@@ -1016,6 +1172,7 @@ def run_benchmark(
     metadata: Optional[dict[str, Any]] = None,
     seed: Optional[int] = None,
     seed_suite: Optional[str] = None,
+    seed_round: int = 0,
     gate_mode: Literal["point", "lower_bound"] = "point",
 ) -> EvaluationReport:
     """Run the full opponent battery and apply optional win-rate gates."""
@@ -1027,11 +1184,23 @@ def run_benchmark(
     if num_games is None:
         num_games = proto.num_games
     base_seed = proto.seed
+    if (
+        isinstance(seed_round, bool)
+        or not isinstance(seed_round, int)
+        or seed_round < 0
+    ):
+        raise ValueError("evaluation seed round must be a non-negative integer")
     if seed is None:
         seed_suite = seed_suite or seed_suite_for_eval_kind(eval_kind)
-        seed = resolve_eval_seed(base_seed, suite=seed_suite)
+        seed = resolve_eval_seed(base_seed, suite=seed_suite, seed_round=seed_round)
     else:
         seed_suite = seed_suite or "explicit"
+        if seed_suite in EVAL_SEED_SUITE_OFFSETS and seed != resolve_eval_seed(
+            base_seed, suite=seed_suite, seed_round=seed_round
+        ):
+            raise ValueError(
+                "explicit evaluation seed does not match the declared suite and round"
+            )
     gates = gates or DEFAULT_BENCHMARK_GATES
     declared_gates = {
         opponent: gates[opponent] for opponent in opponents if opponent in gates
@@ -1056,6 +1225,7 @@ def run_benchmark(
             command=command,
             both_seats=both_seats,
             seed_suite=seed_suite,
+            seed_round=seed_round,
             base_seed=base_seed,
             gate_mode=gate_mode,
             gates=declared_gates,

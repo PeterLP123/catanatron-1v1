@@ -111,6 +111,24 @@ def test_publish_compacts_per_game_rows_but_hashes_them(tmp_path):
     assert len(payload["result_sha256"]) == 64
 
 
+def test_publish_accepts_a_valid_locked_seed_round(tmp_path):
+    report = _report(tmp_path)
+    report.meta["protocol"].update(
+        {
+            "seed": 33_260_729,
+            "base_seed": 20_260_701,
+            "seed_round": 1,
+        }
+    )
+    source = tmp_path / "round-1.json"
+    report.write_json(source)
+
+    output = publish_compact_result(source, tmp_path / "round-1-compact.json")
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["protocol"]["seed_round"] == 1
+
+
 def test_publish_rejects_dev_or_broken_accounting(tmp_path):
     for report in (_report(tmp_path, eval_kind="dev"), _report(tmp_path, errors=1)):
         source = (

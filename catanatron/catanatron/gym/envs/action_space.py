@@ -103,6 +103,17 @@ def to_action_type_space(action_type: ActionType) -> int:
     return ACTION_TYPES.index(action_type)
 
 
+@lru_cache(maxsize=None)
+def get_action_type_array(
+    player_colors: Tuple[Color], map_type: Literal["BASE", "TOURNAMENT", "MINI"]
+) -> Tuple[int, ...]:
+    """Map each versioned full-space action index to its action-family index."""
+    return tuple(
+        to_action_type_space(action_type)
+        for action_type, _ in get_action_array(player_colors, map_type)
+    )
+
+
 def to_action_space(
     action: Action,
     player_colors: Tuple[Color],

@@ -1,0 +1,86 @@
+{
+  "agent": "C:runs/48-outcome-reranker-operational-s20260805/reranker.json",
+  "colonist_1v1": true,
+  "game_evidence": {
+    "rows": 200,
+    "sha256": "ffcc309b004bdc2fe2b7ba9af40328c216b5692e0827650b80edeffb81ec2787"
+  },
+  "matchups": [
+    {
+      "agent_code": "C:runs/48-outcome-reranker-operational-s20260805/reranker.json",
+      "avg_agent_vp": 11.445,
+      "avg_opponent_vp": 13.815,
+      "avg_turns": 97.12,
+      "avg_vp_diff": -2.369999999999999,
+      "completed_games": 200,
+      "draws": 0,
+      "duration_seconds": 48.565123749984195,
+      "error_games": 0,
+      "games": 200,
+      "games_seat0": 100,
+      "games_seat1": 100,
+      "gate": 0.52,
+      "gate_mode": "lower_bound",
+      "gate_value": 0.29669087731339805,
+      "losses": 128,
+      "observed_games": 200,
+      "opponent": "F",
+      "passed_gate": false,
+      "requested_games": 200,
+      "truncated_games": 0,
+      "vp_diff_seat0": -2.88,
+      "vp_diff_seat1": -1.86,
+      "wilson_high": 0.42858600434373184,
+      "wilson_low": 0.29669087731339805,
+      "win_rate": 0.36,
+      "win_rate_seat0": 0.33,
+      "win_rate_seat1": 0.39,
+      "wins": 72
+    }
+  ],
+  "model": {
+    "agent_spec": "C:runs/48-outcome-reranker-operational-s20260805/reranker.json",
+    "checkpoint_label": null,
+    "checkpoint_path": "runs/48-outcome-reranker-operational-s20260805/reranker.json",
+    "file_sha256": "d4f06bc623a31a22bf677d585871299f61fbc61f8f1adec1989144168a8dbeec",
+    "training_timesteps": null
+  },
+  "protocol": {
+    "base_seed": 20260701,
+    "description": "Paired checkpoint promotion schedule",
+    "gate_mode": "lower_bound",
+    "gates": {
+      "F": 0.52
+    },
+    "name": "fast-paired",
+    "num_games_per_matchup": 200,
+    "opponents": [
+      "F"
+    ],
+    "seed": 102260859,
+    "seed_round": 8,
+    "seed_suite": "promotion"
+  },
+  "result_sha256": "2e17c52fd4b1e03323f43138eae182d8eeca61fd2b81509b0f499e0d591a8ab9",
+  "schema_version": "catanatron-result-1",
+  "source_report": {
+    "path": "runs/49-outcome-reranker-promotion-r8/paired-promotion-f/candidate_report.json",
+    "sha256": "47c28057f989187648ae87966966cbf4c41d58fb4ed7a41230434296b206ff7d"
+  },
+  "status": "rejected",
+  "summary": {
+    "accounted_games": 200,
+    "all_games_accounted": true,
+    "best_win_rate": 0.36,
+    "completed_games": 200,
+    "error_games": 0,
+    "gates_passed_count": 0,
+    "gates_total": 1,
+    "mean_win_rate": 0.36,
+    "observed_games": 200,
+    "requested_games": 200,
+    "truncated_games": 0,
+    "weighted_score": 0.328345438656699,
+    "worst_win_rate": 0.36
+  }
+}

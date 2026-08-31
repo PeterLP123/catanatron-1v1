@@ -74,7 +74,12 @@ def load_teacher_parquet(
     """Load teacher parquet logs from one or more directories into a single DataFrame."""
     import pandas as pd
 
-    data_dirs = [Path(p) for p in data_dir] if isinstance(data_dir, Sequence) and not isinstance(data_dir, (str, bytes, Path)) else [Path(data_dir)]  # type: ignore[arg-type]
+    data_dirs = (
+        [Path(p) for p in data_dir]
+        if isinstance(data_dir, Sequence)
+        and not isinstance(data_dir, (str, bytes, Path))
+        else [Path(data_dir)]
+    )  # type: ignore[arg-type]
     paths: list[Path] = []
     for d in data_dirs:
         meta_path = d / "dataset_meta.json"
@@ -291,13 +296,40 @@ def hard_state_sample_weights(
     With ``require_distinct_candidates``, scored rows whose candidates are all
     equal (no value distinction) are dropped too.
     """
-    from catanatron.gym.envs.action_space import ACTION_TYPES
+    from catanatron.gym.envs.action_space import (
+        ACTION_TYPES,
+        get_action_type_array,
+    )
 
     n = len(df)
     fam_w = {**DEFAULT_FAMILY_WEIGHTS, **(family_weights or {})}
     name_by_index = {i: at.name for i, at in enumerate(ACTION_TYPES)}
 
-    action_types = df["ACTION_TYPE"].to_numpy()
+    if "ACTION_TYPE" in df.columns:
+        action_types = df["ACTION_TYPE"].to_numpy()
+    elif "ACTION" in df.columns:
+        # Distillation shards store the versioned full action index rather than
+        # the redundant ACTION_TYPE column used by teacher-game shards. Derive
+        # the same family id so mixed immutable corpora can use one weighting
+        # contract without rewriting old data.
+        action_type_array = np.asarray(
+            get_action_type_array((Color.BLUE, Color.RED), "BASE"), dtype=int
+        )
+        try:
+            action_indices = df["ACTION"].to_numpy(dtype=np.int64)
+            if bool(
+                (
+                    (action_indices < 0) | (action_indices >= len(action_type_array))
+                ).any()
+            ):
+                raise IndexError("action index outside BASE 1v1 schema")
+            action_types = action_type_array[action_indices]
+        except (IndexError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "Cannot derive hard-state action families from ACTION indices"
+            ) from exc
+    else:
+        raise ValueError("Hard-state weighting requires ACTION_TYPE or ACTION")
     weights = np.array(
         [fam_w.get(name_by_index.get(int(a)), 1.0) for a in action_types],
         dtype=float,
@@ -318,6 +350,61 @@ def hard_state_sample_weights(
                 weights[i] = 0.0
 
     return weights
+
+
+def outcome_deficit_sample_weights(
+    df,
+    *,
+    loss_bonus: float = 1.0,
+    vp_deficit_bonus: float = 0.5,
+    vp_deficit_scale: float = 10.0,
+):
+    """Upweight teacher corrections from student losses and large VP deficits.
+
+    This is intentionally a bounded, training-only treatment for fresh
+    student-visited DAgger rows.  A win keeps weight 1.0.  A loss adds at most
+    ``loss_bonus`` and a negative terminal VP margin adds at most
+    ``vp_deficit_bonus`` once the deficit reaches ``vp_deficit_scale``.
+
+    Selected corpora must carry complete native terminal targets.  Missing or
+    non-finite values are rejected rather than silently receiving neutral
+    weights, because that would change the declared treatment.
+    """
+    values = {
+        "loss_bonus": float(loss_bonus),
+        "vp_deficit_bonus": float(vp_deficit_bonus),
+        "vp_deficit_scale": float(vp_deficit_scale),
+    }
+    if any(not np.isfinite(value) for value in values.values()):
+        raise ValueError("Outcome-deficit weighting parameters must be finite")
+    loss_bonus = values["loss_bonus"]
+    vp_deficit_bonus = values["vp_deficit_bonus"]
+    vp_deficit_scale = values["vp_deficit_scale"]
+    if loss_bonus < 0 or vp_deficit_bonus < 0:
+        raise ValueError("Outcome-deficit bonuses must be non-negative")
+    if vp_deficit_scale <= 0:
+        raise ValueError("Outcome-deficit VP scale must be positive")
+    if loss_bonus == 0 and vp_deficit_bonus == 0:
+        raise ValueError("Outcome-deficit weighting requires a positive bonus")
+
+    required = ("RETURN", "VICTORY_POINT_MARGIN_RETURN")
+    missing = [column for column in required if column not in df.columns]
+    if missing:
+        raise ValueError(
+            "Outcome-deficit weighting requires native terminal targets: "
+            + ", ".join(missing)
+        )
+    returns = df[required[0]].to_numpy(dtype=float)
+    margins = df[required[1]].to_numpy(dtype=float)
+    if not bool(np.isfinite(returns).all() and np.isfinite(margins).all()):
+        raise ValueError(
+            "Outcome-deficit weighting requires finite native terminal targets"
+        )
+
+    loss_severity = np.clip(-returns, 0.0, 1.0)
+    vp_deficit = np.clip(-margins / vp_deficit_scale, 0.0, 1.0)
+    weights = 1.0 + loss_bonus * loss_severity + vp_deficit_bonus * vp_deficit
+    return weights.astype(np.float32, copy=False)
 
 
 def sample_hard_states(df, *, n: Optional[int] = None, seed: int = 0, **kwargs):
@@ -441,11 +528,30 @@ class BcCheckpointMeta:
     n_actions: int
     hidden_sizes: list[int]
     epochs: int
+    architecture: str = "mlp"
+    embedding_dim: int = 128
+    win_value_weight: float = 0.0
+    vp_margin_weight: float = 0.0
+    parameter_count: int = 0
+    trainable_parameter_count: int = 0
+    base_policy_frozen: bool = False
+    initialization_mode: Optional[str] = None
+    win_value_target_shards: int = 0
+    vp_margin_target_shards: int = 0
     val_accuracy: Optional[float] = None
     train_rows: int = 0
     data_dirs: list[str] = field(default_factory=list)
     augmentation_data_dirs: list[str] = field(default_factory=list)
     augmentation_weight: float = 1.0
+    outcome_weighted_augmentation_data_dirs: list[str] = field(default_factory=list)
+    outcome_loss_bonus: float = 0.0
+    outcome_vp_deficit_bonus: float = 0.0
+    outcome_vp_deficit_scale: float = 10.0
+    outcome_weighting_summary: dict[str, Any] = field(default_factory=dict)
+    init_checkpoint: Optional[str] = None
+    init_checkpoint_sha256: Optional[str] = None
+    initial_val_loss: Optional[float] = None
+    initial_val_metrics: dict[str, Any] = field(default_factory=dict)
     val_loss: Optional[float] = None
     loss_name: str = "cross_entropy"
     listwise_temperature: Optional[float] = None
@@ -462,6 +568,7 @@ class BcCheckpointMeta:
     model_schema: dict[str, Any] = field(default_factory=dict)
     input_shards: list[dict[str, Any]] = field(default_factory=list)
     dataset_sha256: Optional[str] = None
+    expected_dataset_contract: dict[str, Any] = field(default_factory=dict)
 
     def save(self, path: Path) -> None:
         path.write_text(
@@ -726,7 +833,12 @@ def make_mixed_opponent_factory(
         return player
 
     def _factory() -> Player:
-        nonlocal teacher_codes, league_weight, teacher_weight, baseline_weight, baseline_code
+        nonlocal \
+            teacher_codes, \
+            league_weight, \
+            teacher_weight, \
+            baseline_weight, \
+            baseline_code
         if curriculum is not None:
             stage = curriculum.stage_for(step_getter() if step_getter else 0)
             teacher_codes = stage.teacher_codes

@@ -1,0 +1,86 @@
+{
+  "agent": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+  "colonist_1v1": true,
+  "game_evidence": {
+    "rows": 800,
+    "sha256": "d96a2bd13aa4d1eaf815465a67d7176c88bdd7fbda726adb734c296cb4728409"
+  },
+  "matchups": [
+    {
+      "agent_code": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+      "avg_agent_vp": 11.21,
+      "avg_opponent_vp": 13.66125,
+      "avg_turns": 96.24875,
+      "avg_vp_diff": -2.45125,
+      "completed_games": 800,
+      "draws": 0,
+      "duration_seconds": 184.73894016700797,
+      "error_games": 0,
+      "games": 800,
+      "games_seat0": 400,
+      "games_seat1": 400,
+      "gate": 0.52,
+      "gate_mode": "lower_bound",
+      "gate_value": 0.2922346889640033,
+      "losses": 541,
+      "observed_games": 800,
+      "opponent": "F",
+      "passed_gate": false,
+      "requested_games": 800,
+      "truncated_games": 0,
+      "vp_diff_seat0": -2.0875,
+      "vp_diff_seat1": -2.815,
+      "wilson_high": 0.3569499265124786,
+      "wilson_low": 0.2922346889640033,
+      "win_rate": 0.32375,
+      "win_rate_seat0": 0.34,
+      "win_rate_seat1": 0.3075,
+      "wins": 259
+    }
+  ],
+  "model": {
+    "agent_spec": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+    "checkpoint_label": null,
+    "checkpoint_path": "runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+    "file_sha256": "32031687acee2636e60a2b2c9bf667580f7a884e5e223ddc230d131726381943",
+    "training_timesteps": null
+  },
+  "protocol": {
+    "base_seed": 20260701,
+    "description": "Paired checkpoint promotion schedule",
+    "gate_mode": "lower_bound",
+    "gates": {
+      "F": 0.52
+    },
+    "name": "fast-paired",
+    "num_games_per_matchup": 800,
+    "opponents": [
+      "F"
+    ],
+    "seed": 52260764,
+    "seed_round": 3,
+    "seed_suite": "promotion"
+  },
+  "result_sha256": "95d0909e5347628be28a18baf89113ef17b1be659b71d51c20a2f2994b0088ed",
+  "schema_version": "catanatron-result-1",
+  "source_report": {
+    "path": "runs/33-dagger-f-iter1-warmstart-confirm-n800-r3/paired-promotion-f/candidate_report.json",
+    "sha256": "c5ae320ebbd420ba5d66b367645ccd38bb2aa89533499e32702a90f434cff4ea"
+  },
+  "status": "rejected",
+  "summary": {
+    "accounted_games": 800,
+    "all_games_accounted": true,
+    "best_win_rate": 0.32375,
+    "completed_games": 800,
+    "error_games": 0,
+    "gates_passed_count": 0,
+    "gates_total": 1,
+    "mean_win_rate": 0.32375,
+    "observed_games": 800,
+    "requested_games": 800,
+    "truncated_games": 0,
+    "weighted_score": 0.30799234448200163,
+    "worst_win_rate": 0.32375
+  }
+}

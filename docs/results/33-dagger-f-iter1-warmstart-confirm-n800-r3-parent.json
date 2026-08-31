@@ -1,0 +1,86 @@
+{
+  "agent": "T:runs/28-dagger-f-s101/bc/bc.pt",
+  "colonist_1v1": true,
+  "game_evidence": {
+    "rows": 800,
+    "sha256": "f59dbb588ca1d492ce1870b585ed660b4c13d14235f12a51283794bb5ef2ff82"
+  },
+  "matchups": [
+    {
+      "agent_code": "T:runs/28-dagger-f-s101/bc/bc.pt",
+      "avg_agent_vp": 10.7525,
+      "avg_opponent_vp": 13.8525,
+      "avg_turns": 97.87875,
+      "avg_vp_diff": -3.0999999999999996,
+      "completed_games": 800,
+      "draws": 0,
+      "duration_seconds": 141.10601445799693,
+      "error_games": 0,
+      "games": 800,
+      "games_seat0": 400,
+      "games_seat1": 400,
+      "gate": 0.52,
+      "gate_mode": "lower_bound",
+      "gate_value": 0.2487922274948797,
+      "losses": 577,
+      "observed_games": 800,
+      "opponent": "F",
+      "passed_gate": false,
+      "requested_games": 800,
+      "truncated_games": 0,
+      "vp_diff_seat0": -3.0075,
+      "vp_diff_seat1": -3.1925,
+      "wilson_high": 0.3108225025713423,
+      "wilson_low": 0.2487922274948797,
+      "win_rate": 0.27875,
+      "win_rate_seat0": 0.27,
+      "win_rate_seat1": 0.2875,
+      "wins": 223
+    }
+  ],
+  "model": {
+    "agent_spec": "T:runs/28-dagger-f-s101/bc/bc.pt",
+    "checkpoint_label": null,
+    "checkpoint_path": "runs/28-dagger-f-s101/bc/bc.pt",
+    "file_sha256": "b366433c5c7f80810a154395b4a5016a93f1f253c3a370e783850029d48b375e",
+    "training_timesteps": null
+  },
+  "protocol": {
+    "base_seed": 20260701,
+    "description": "Paired checkpoint promotion schedule",
+    "gate_mode": "lower_bound",
+    "gates": {
+      "F": 0.52
+    },
+    "name": "fast-paired",
+    "num_games_per_matchup": 800,
+    "opponents": [
+      "F"
+    ],
+    "seed": 52260764,
+    "seed_round": 3,
+    "seed_suite": "promotion"
+  },
+  "result_sha256": "53071c339dee2630e75ee8ffc204d38f3149c0711470e79129fdaca48ffd474e",
+  "schema_version": "catanatron-result-1",
+  "source_report": {
+    "path": "runs/33-dagger-f-iter1-warmstart-confirm-n800-r3/paired-promotion-f/baseline_report.json",
+    "sha256": "df1c7e459de7c5c9a62affc3d5035d3d656b4bbfdfc044bab174a4324020a6fd"
+  },
+  "status": "rejected",
+  "summary": {
+    "accounted_games": 800,
+    "all_games_accounted": true,
+    "best_win_rate": 0.27875,
+    "completed_games": 800,
+    "error_games": 0,
+    "gates_passed_count": 0,
+    "gates_total": 1,
+    "mean_win_rate": 0.27875,
+    "observed_games": 800,
+    "requested_games": 800,
+    "truncated_games": 0,
+    "weighted_score": 0.26377111374743983,
+    "worst_win_rate": 0.27875
+  }
+}

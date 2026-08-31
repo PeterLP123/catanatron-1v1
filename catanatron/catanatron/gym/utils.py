@@ -128,6 +128,24 @@ def get_victory_points_total_return(game, p0_color):
     return episode_return * 0.9999**game.state.num_turns
 
 
+def get_victory_point_margin_total_return(game, p0_color):
+    """Terminal VP margin from the acting player's perspective.
+
+    In multiplayer data the comparison is against the strongest opponent; for
+    this project's 1v1 data that is exactly own VP minus the other player's VP.
+    """
+    own_points = get_actual_victory_points(game.state, p0_color)
+    opponent_points = [
+        get_actual_victory_points(game.state, color)
+        for color in game.state.colors
+        if color != p0_color
+    ]
+    if not opponent_points:
+        raise ValueError("Victory-point margin requires at least two players")
+    margin = own_points - max(opponent_points)
+    return margin * 0.9999**game.state.num_turns
+
+
 def get_discounted_returns(rewards, gamma):
     """
     Compute discounted returns G_t for each timestep.

@@ -9,6 +9,7 @@ from catanatron.gym.colonist_rewards import (
 )
 from catanatron.gym.utils import (
     get_tournament_total_return,
+    get_victory_point_margin_total_return,
     get_victory_points_total_return,
     infer_vps_cap,
 )
@@ -48,6 +49,18 @@ def test_tournament_return_respects_vp_cap():
     ):
         r = get_tournament_total_return(game, Color.BLUE)
     assert r == 1000 + min(14, 15) * (0.9999**0)
+
+
+def test_victory_point_margin_return_uses_acting_player_perspective():
+    game = MagicMock()
+    game.state.colors = (Color.BLUE, Color.RED)
+    game.state.num_turns = 0
+    with patch(
+        "catanatron.gym.utils.get_actual_victory_points",
+        side_effect=lambda _state, color: {Color.BLUE: 8, Color.RED: 10}[color],
+    ):
+        assert get_victory_point_margin_total_return(game, Color.BLUE) == -2
+        assert get_victory_point_margin_total_return(game, Color.RED) == 2
 
 
 def test_colonist_shaped_terminal_and_vp_delta():

@@ -26,6 +26,7 @@ from catanatron.gym.distillation import (
     run_distillation_iteration,
     verify_distillation_dataset,
 )
+from catanatron.models.enums import ActionType
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -80,6 +81,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip expensive chance-aware F candidate scoring (teacher action remains).",
     )
     parser.add_argument(
+        "--teacher-seed-round",
+        type=int,
+        default=0,
+        help=(
+            "Disjoint isolated teacher RNG round; game seeds and student behavior "
+            "remain fixed."
+        ),
+    )
+    parser.add_argument(
+        "--only-when-legal-action-type",
+        action="append",
+        choices=tuple(ActionType.__members__),
+        default=None,
+        help=(
+            "Record and invoke the teacher only when this action family is legal. "
+            "May be repeated."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print resolved hashes, schema, paths, and deterministic seeds only.",
@@ -106,6 +126,8 @@ def _config(args: argparse.Namespace) -> DistillationConfig:
         include_forced=args.include_forced,
         score_f_candidates=not args.no_candidate_scores,
         shard_games=args.shard_games,
+        teacher_seed_round=args.teacher_seed_round,
+        record_legal_action_types=tuple(args.only_when_legal_action_type or ()),
     )
 
 

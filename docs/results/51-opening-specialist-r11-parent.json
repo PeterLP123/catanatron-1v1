@@ -1,0 +1,86 @@
+{
+  "agent": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+  "colonist_1v1": true,
+  "game_evidence": {
+    "rows": 400,
+    "sha256": "f671cedabe1e9119c6525c8787fead21db12ee490de83c6bcd050f2071c63e91"
+  },
+  "matchups": [
+    {
+      "agent_code": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+      "avg_agent_vp": 11.03,
+      "avg_opponent_vp": 13.74,
+      "avg_turns": 97.4675,
+      "avg_vp_diff": -2.710000000000001,
+      "completed_games": 400,
+      "draws": 0,
+      "duration_seconds": 71.90648424999381,
+      "error_games": 0,
+      "games": 400,
+      "games_seat0": 200,
+      "games_seat1": 200,
+      "gate": 0.52,
+      "gate_mode": "lower_bound",
+      "gate_value": 0.2547968004201624,
+      "losses": 281,
+      "observed_games": 400,
+      "opponent": "F",
+      "passed_gate": false,
+      "requested_games": 400,
+      "truncated_games": 0,
+      "vp_diff_seat0": -2.145,
+      "vp_diff_seat1": -3.275,
+      "wilson_high": 0.3440558190227082,
+      "wilson_low": 0.2547968004201624,
+      "win_rate": 0.2975,
+      "win_rate_seat0": 0.325,
+      "win_rate_seat1": 0.27,
+      "wins": 119
+    }
+  ],
+  "model": {
+    "agent_spec": "T:runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+    "checkpoint_label": null,
+    "checkpoint_path": "runs/32-dagger-f-iter1-warmstart-s101/bc/bc.pt",
+    "file_sha256": "32031687acee2636e60a2b2c9bf667580f7a884e5e223ddc230d131726381943",
+    "training_timesteps": null
+  },
+  "protocol": {
+    "base_seed": 20260701,
+    "description": "Paired checkpoint promotion schedule",
+    "gate_mode": "lower_bound",
+    "gates": {
+      "F": 0.52
+    },
+    "name": "fast-paired",
+    "num_games_per_matchup": 400,
+    "opponents": [
+      "F"
+    ],
+    "seed": 132260916,
+    "seed_round": 11,
+    "seed_suite": "promotion"
+  },
+  "result_sha256": "50b002de35c8d77af868aa7e6f49994ec4cf22dadcb7faf7c2930d90aca6e97d",
+  "schema_version": "catanatron-result-1",
+  "source_report": {
+    "path": "runs/51-opening-specialist-s20260830/paired-promotion-f/baseline_report.json",
+    "sha256": "1a5e9eee8542b7f967eb80f24c481fd0be5e381488a4104551855cac5606a632"
+  },
+  "status": "rejected",
+  "summary": {
+    "accounted_games": 400,
+    "all_games_accounted": true,
+    "best_win_rate": 0.2975,
+    "completed_games": 400,
+    "error_games": 0,
+    "gates_passed_count": 0,
+    "gates_total": 1,
+    "mean_win_rate": 0.2975,
+    "observed_games": 400,
+    "requested_games": 400,
+    "truncated_games": 0,
+    "weighted_score": 0.2761484002100812,
+    "worst_win_rate": 0.2975
+  }
+}
