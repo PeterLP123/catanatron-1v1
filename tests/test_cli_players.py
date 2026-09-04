@@ -1,3 +1,7 @@
+import subprocess
+import sys
+import textwrap
+
 import pytest
 from click.testing import CliRunner
 
@@ -42,3 +46,49 @@ def test_invalid_cli_arguments_return_usage_error(args, message):
     result = CliRunner().invoke(simulate, args)
     assert result.exit_code == 2
     assert message in result.output
+
+
+def test_cli_baselines_and_help_work_without_optional_dependencies(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            textwrap.dedent(
+                """
+            import importlib.abc
+            import sys
+
+            optional = {
+                'numpy', 'pandas', 'gymnasium', 'torch', 'stable_baselines3',
+                'sb3_contrib', 'textual', 'pyarrow', 'fastparquet', 'tensorboard'
+            }
+
+            class CoreOnly(importlib.abc.MetaPathFinder):
+                def find_spec(self, fullname, path=None, target=None):
+                    if fullname.split('.')[0] in optional:
+                        raise ModuleNotFoundError(fullname, name=fullname)
+
+            sys.meta_path.insert(0, CoreOnly())
+            from click.testing import CliRunner
+            from catanatron.cli.play import simulate
+            runner = CliRunner()
+            for args in (
+                ['--help'], ['--help-players'],
+                ['--colonist-1v1', '--players', 'F,R', '--num', '1', '--seed', '7']
+            ):
+                result = runner.invoke(simulate, args)
+                assert result.exit_code == 0, (result.output, result.exception)
+            for code in ('L', 'T', 'C', 'O', 'N', 'Q'):
+                result = runner.invoke(simulate, ['--players', f'{code}:missing,R'])
+                assert result.exit_code == 2, (code, result.exception)
+                assert 'catanatron-1v1[gym,colonist]' in result.output
+            assert not optional.intersection(sys.modules)
+        """
+            ),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

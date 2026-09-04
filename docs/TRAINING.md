@@ -736,6 +736,7 @@ runs/my_bot/
 ├── model_schema.json
 ├── environment.lock.txt
 ├── run_manifest.json
+├── job_state.json
 ├── training_events.jsonl
 ├── models_index.jsonl
 ├── checkpoints/
@@ -752,12 +753,23 @@ The manifest records command/configuration, exact PPO parameters, Git branch/com
 state, Python executable/version, package-set hash, hardware/CUDA/MPS details, schema hashes,
 and final checkpoint hash. `environment.lock.txt` records the exact installed distributions.
 
+The trainer owns `run_manifest.json`. Dashboard-launched jobs write their command, status,
+exit code, and any runner error atomically to `job_state.json`, so training updates cannot
+erase job status. The dashboard and backlog also read job status from older manifests
+when no separate job state exists. Both writers append to `training_events.jsonl`.
+
 ## Dashboard and verification
 
 ```bash
 python examples/colonist_1v1_tui.py --run-dir runs/my_bot
 python examples/colonist_1v1_tui.py --run-dir runs/my_bot --once
 ```
+
+The dashboard runs one job at a time. Cancel requests return immediately, including while
+a job is starting. On macOS/Linux, shutdown signals the job's process group, including
+shell and training workers, escalating from interrupt to terminate to kill after one
+second per grace period. The runner reaps the launched process and closes its output pipe
+before accepting another job. On Windows, shutdown terminates the direct subprocess.
 
 For a portable NVIDIA CUDA setup and a monitored `tmux` session:
 

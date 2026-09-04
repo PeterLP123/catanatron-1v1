@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, BinaryIO, Iterable, Optional, Sequence
 
-from catanatron.file_utils import write_json_atomic
 from catanatron.gym.colonist_training import (
     EVENTS_NAME,
     MANIFEST_NAME,
@@ -19,6 +18,7 @@ from catanatron.gym.colonist_training import (
 
 
 OPPONENT_COLUMNS: tuple[str, ...] = ("R", "W", "VP", "F", "G:25", "M:200", "AB:2")
+JOB_STATE_NAME = "job_state.json"
 
 
 def parse_timestamp(value: Any) -> Optional[datetime]:
@@ -112,14 +112,13 @@ def append_event(run_dir: Path, event_type: str, **data: Any) -> dict[str, Any]:
     return row
 
 
-def update_manifest(run_dir: Path, **updates: Any) -> dict[str, Any]:
-    run_dir.mkdir(parents=True, exist_ok=True)
-    path = run_dir / MANIFEST_NAME
-    manifest = read_json_safe(path, {})
-    manifest.update(updates)
-    manifest["updated_at"] = utc_now_iso()
-    write_json_atomic(path, manifest)
-    return manifest
+def read_job_state(run_dir: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    """Read job-owned state, with legacy manifests supported for historical runs."""
+    path = run_dir / JOB_STATE_NAME
+    if path.exists():
+        return read_json_safe(path, {})
+    legacy = manifest.get("active_job")
+    return legacy if isinstance(legacy, dict) else {}
 
 
 def score_value(row: dict[str, Any]) -> float:
@@ -210,6 +209,7 @@ class RunSummary:
 def summarize_run(run_dir: Path, *, now: Optional[datetime] = None) -> RunSummary:
     now = now or datetime.now(timezone.utc)
     manifest = read_json_safe(run_dir / MANIFEST_NAME, {})
+    manifest["active_job"] = read_job_state(run_dir, manifest)
     events = read_jsonl_safe(run_dir / EVENTS_NAME, limit=500)
     registry = load_registry(run_dir)
     training = manifest.get("training", {})

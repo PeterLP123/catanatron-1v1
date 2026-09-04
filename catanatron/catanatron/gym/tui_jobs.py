@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import subprocess
@@ -12,7 +13,8 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence
 from uuid import uuid4
 
-from catanatron.gym.tui_data import append_event, update_manifest, utc_now_iso
+from catanatron.file_utils import write_json_atomic
+from catanatron.gym.tui_data import JOB_STATE_NAME, append_event, utc_now_iso
 
 
 LogCallback = Callable[[str], None]
@@ -32,6 +34,12 @@ class BackgroundJob:
     exit_code: Optional[int] = None
     process: Optional[subprocess.Popen[str]] = field(default=None, repr=False)
     log_path: Optional[Path] = None
+    error: Optional[str] = None
+    finished: threading.Event = field(default_factory=threading.Event, repr=False)
+    _cancel_requested: bool = field(default=False, repr=False)
+    _stop_requested: threading.Event = field(
+        default_factory=threading.Event, repr=False
+    )
 
     def to_manifest(self) -> dict[str, object]:
         return {
@@ -43,6 +51,7 @@ class BackgroundJob:
             "ended_at": self.ended_at,
             "exit_code": self.exit_code,
             "log_path": os.fspath(self.log_path) if self.log_path else None,
+            "error": self.error,
         }
 
 
@@ -64,7 +73,7 @@ class JobRunner:
 
     def start(self, name: str, command: Sequence[str]) -> BackgroundJob:
         with self._lock:
-            if self.active is not None and self.active.status in {"pending", "running"}:
+            if self.active is not None and not self.active.finished.is_set():
                 raise RuntimeError(f"Job already running: {self.active.name}")
             job = BackgroundJob(name=name, command=list(command), run_dir=self.run_dir)
             self.active = job
@@ -73,33 +82,21 @@ class JobRunner:
         return job
 
     def cancel(self) -> None:
-        job = self.active
-        if job is None or job.process is None or job.status != "running":
-            return
-        append_event(self.run_dir, "job_cancel_requested", job=job.to_manifest())
-        try:
-            job.process.send_signal(signal.SIGINT)
-            time.sleep(1.0)
-            if job.process.poll() is None:
-                job.process.terminate()
-        except OSError:
-            pass
-
-    def _emit_log(self, line: str) -> None:
-        if self.on_log:
-            self.on_log(line)
+        """Request cancellation without doing I/O or waiting on the UI thread."""
+        with self._lock:
+            job = self.active
+            if job is not None and job.status in {"pending", "running"}:
+                job._cancel_requested = True
+                job._stop_requested.set()
 
     def _run(self, job: BackgroundJob) -> None:
-        self.run_dir.mkdir(parents=True, exist_ok=True)
-        logs_dir = self.run_dir / "tui_logs"
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        job.log_path = logs_dir / f"{job.job_id}_{job.name.replace(' ', '_')}.log"
-        job.status = "running"
-        job.started_at = utc_now_iso()
-        update_manifest(self.run_dir, active_job=job.to_manifest())
-        append_event(self.run_dir, "job_started", job=job.to_manifest())
-
+        stopper = None
         try:
+            logs_dir = job.run_dir / "tui_logs"
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            job.log_path = logs_dir / f"{job.job_id}_{job.name.replace(' ', '_')}.log"
+            if job._cancel_requested:
+                return
             with job.log_path.open("a", encoding="utf-8") as log:
                 log.write(f"$ {' '.join(job.command)}\n")
                 job.process = subprocess.Popen(
@@ -109,25 +106,96 @@ class JobRunner:
                     stderr=subprocess.STDOUT,
                     text=True,
                     bufsize=1,
+                    start_new_session=os.name == "posix",
                 )
+                stopper = threading.Thread(
+                    target=self._stop_process, args=(job,), daemon=True
+                )
+                stopper.start()
+                job.status = "running"
+                job.started_at = utc_now_iso()
+                write_json_atomic(job.run_dir / JOB_STATE_NAME, job.to_manifest())
+                append_event(job.run_dir, "job_started", job=job.to_manifest())
                 assert job.process.stdout is not None
-                try:
-                    for line in job.process.stdout:
-                        log.write(line)
-                        log.flush()
-                        self._emit_log(line.rstrip())
-                finally:
-                    # ``Popen.wait`` does not close PIPE file objects.  TUI jobs
-                    # are long-lived, so leaking one descriptor per job becomes
-                    # visible quickly and pytest correctly reports it.
-                    job.process.stdout.close()
+                for line in job.process.stdout:
+                    log.write(line)
+                    log.flush()
+                    if self.on_log:
+                        self.on_log(line.rstrip())
                 job.exit_code = job.process.wait()
-            job.status = "succeeded" if job.exit_code == 0 else "failed"
-        except Exception as exc:  # pragma: no cover - defensive guard for UI jobs
-            job.status = "failed"
-            job.exit_code = -1
-            self._emit_log(f"job runner error: {exc}")
+        except Exception as exc:
+            job.error = str(exc)
+            logging.getLogger(__name__).exception("Job %s failed", job.name)
         finally:
-            job.ended_at = utc_now_iso()
-            update_manifest(self.run_dir, active_job=job.to_manifest())
-            append_event(self.run_dir, "job_finished", job=job.to_manifest())
+            # Also stop/reap the child on log, callback, and telemetry failures.
+            # The stopper can interrupt a blocked stdout read without blocking the UI.
+            job._stop_requested.set()
+            if job.process is not None:
+                if stopper is not None and stopper.ident is not None:
+                    stopper.join()
+                else:
+                    self._stop_process(job)
+                job.exit_code = job.process.wait()
+                if job.process.stdout is not None:
+                    job.process.stdout.close()
+            try:
+                with self._lock:
+                    job.ended_at = utc_now_iso()
+                    if job._cancel_requested:
+                        job.status = "cancelled"
+                    else:
+                        job.status = (
+                            "succeeded"
+                            if job.exit_code == 0 and not job.error
+                            else "failed"
+                        )
+                if job._cancel_requested:
+                    append_event(
+                        job.run_dir, "job_cancel_requested", job=job.to_manifest()
+                    )
+                append_event(job.run_dir, "job_finished", job=job.to_manifest())
+            except Exception as exc:
+                job.error = str(exc)
+                job.status = "failed"
+                logging.getLogger(__name__).exception(
+                    "Could not record job %s", job.name
+                )
+            try:
+                write_json_atomic(job.run_dir / JOB_STATE_NAME, job.to_manifest())
+            except Exception as exc:
+                job.error = str(exc)
+                job.status = "failed"
+                logging.getLogger(__name__).exception("Could not save job %s", job.name)
+            finally:
+                job.finished.set()
+
+    def _stop_process(self, job: BackgroundJob) -> None:
+        job._stop_requested.wait()
+        process = job.process
+        assert process is not None
+        if os.name != "posix":
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+            return
+
+        # The session belongs to this job. Signal the whole group even if the
+        # shell/parent already exited, since workers may still hold stdout open.
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(process.pid, sig)
+            except ProcessLookupError:
+                return
+            if sig == signal.SIGKILL:
+                return
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                process.poll()
+                try:
+                    os.killpg(process.pid, 0)
+                except ProcessLookupError:
+                    return
+                time.sleep(0.05)

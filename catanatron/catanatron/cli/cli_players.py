@@ -1,4 +1,6 @@
-from collections import namedtuple
+from dataclasses import dataclass
+from importlib import import_module
+from typing import Callable
 
 from rich.table import Table
 
@@ -9,18 +11,24 @@ from catanatron.players.minimax import AlphaBetaPlayer, SameTurnAlphaBetaPlayer
 from catanatron.players.search import VictoryPointPlayer
 from catanatron.players.mcts import MCTSPlayer
 from catanatron.players.playouts import GreedyPlayoutsPlayer
-from catanatron.players.learned import (
-    OpeningSpecialistCheckpointPlayer,
-    OutcomeRerankerCheckpointPlayer,
-    Sb3CheckpointPlayer,
-    TorchBcCheckpointPlayer,
-)
-from catanatron.players.visible_puct import VisibleSameTurnPuctPlayer
-from catanatron.players.visible_chance_puct import VisibleChancePuctPlayer
 
 
-# Player must have a CODE, NAME, DESCRIPTION, CLASS.
-CliPlayer = namedtuple("CliPlayer", ["code", "name", "description", "import_fn"])
+@dataclass(frozen=True)
+class CliPlayer:
+    code: str
+    name: str
+    description: str
+    factory: Callable | str
+
+    @property
+    def import_fn(self) -> Callable:
+        """Resolve optional players only when selected, keeping CLI help lightweight."""
+        if isinstance(self.factory, str):
+            module, name = self.factory.rsplit(".", 1)
+            return getattr(import_module(module), name)
+        return self.factory
+
+
 CLI_PLAYERS = [
     CliPlayer(
         "H", "HumanPlayer", "Human player, uses input() to get action.", HumanPlayer
@@ -76,37 +84,37 @@ CLI_PLAYERS = [
         "L",
         "Sb3CheckpointPlayer",
         "MaskablePPO policy (sb3-contrib). Pass checkpoint path, e.g. L:runs/ppo.zip",
-        Sb3CheckpointPlayer,
+        "catanatron.players.learned.Sb3CheckpointPlayer",
     ),
     CliPlayer(
         "T",
         "TorchBcCheckpointPlayer",
         "Torch BC policy (.pt + .meta.json). e.g. T:runs/colonist_bc_policy.pt",
-        TorchBcCheckpointPlayer,
+        "catanatron.players.learned.TorchBcCheckpointPlayer",
     ),
     CliPlayer(
         "C",
         "OutcomeRerankerCheckpointPlayer",
         "Frozen Torch BC policy plus bounded outcome-critic reranker manifest.",
-        OutcomeRerankerCheckpointPlayer,
+        "catanatron.players.learned.OutcomeRerankerCheckpointPlayer",
     ),
     CliPlayer(
         "O",
         "OpeningSpecialistCheckpointPlayer",
         "Frozen Torch BC policy plus deterministic setup-only value fallback manifest.",
-        OpeningSpecialistCheckpointPlayer,
+        "catanatron.players.learned.OpeningSpecialistCheckpointPlayer",
     ),
     CliPlayer(
         "N",
         "VisibleSameTurnPuctPlayer",
         "Frozen policy-guided same-turn PUCT with a hidden-information boundary.",
-        VisibleSameTurnPuctPlayer,
+        "catanatron.players.visible_puct.VisibleSameTurnPuctPlayer",
     ),
     CliPlayer(
         "Q",
         "VisibleChancePuctPlayer",
         "Visible same-turn PUCT with public dice and development-card chance nodes.",
-        VisibleChancePuctPlayer,
+        "catanatron.players.visible_chance_puct.VisibleChancePuctPlayer",
     ),
 ]
 
@@ -128,7 +136,22 @@ def parse_cli_string(player_string: str):
         specifications.append((entry, params))
     players = []
     for color, (entry, params) in zip(colors, specifications):
-        players.append(entry.import_fn(color, *params))
+        try:
+            players.append(entry.import_fn(color, *params))
+        except ModuleNotFoundError as exc:
+            if isinstance(entry.factory, str) and exc.name in {
+                "numpy",
+                "pandas",
+                "gymnasium",
+                "torch",
+                "stable_baselines3",
+                "sb3_contrib",
+            }:
+                raise ValueError(
+                    f"Player {entry.code} requires {exc.name}; install training dependencies "
+                    "with pip install 'catanatron-1v1[gym,colonist]'"
+                ) from exc
+            raise
     return players
 
 

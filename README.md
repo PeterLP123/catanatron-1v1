@@ -26,6 +26,10 @@ The upstream React UI, Flask API, database replay service, experimental package,
 
 Python 3.11 or newer is required.
 
+For baseline games and CLI help, `python -m pip install -e .` installs just the core
+dependencies. Learned players (`L`, `T`, `C`, `O`, `N`, `Q`) load their dependencies
+when selected and require the `gym,colonist` extras. The full development setup is:
+
 ```bash
 git clone https://github.com/PeterLP123/catanatron-1v1.git
 cd catanatron-1v1

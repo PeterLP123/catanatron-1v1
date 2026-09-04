@@ -34,9 +34,7 @@ from catanatron.gym.tui_data import (
     detect_warnings,
     load_registry,
     summarize_run,
-    update_manifest,
 )
-from catanatron.gym.tui_jobs import JobRunner
 from catanatron.gym.envs.catanatron_env import CatanatronEnv
 from catanatron.gym.wrappers.self_play import SelfPlayEnv
 from catanatron.players.weighted_random import WeightedRandomPlayer
@@ -366,9 +364,8 @@ def test_tui_dashboard_loads_empty_run(tmp_path):
 
 
 def test_tui_run_summary_registry_and_warnings(tmp_path):
-    update_manifest(
-        tmp_path,
-        run_id="run-a",
+    tracker = TrainingRunTracker(tmp_path, run_id="run-a")
+    tracker.update_manifest(
         phase="ppo_training",
         training={"timesteps": 1000},
     )
@@ -417,38 +414,11 @@ def test_tui_command_builders():
     assert "--report" in eval_cmd
 
 
-def test_job_runner_rejects_second_job_while_first_is_pending(tmp_path, monkeypatch):
-    monkeypatch.setattr("threading.Thread.start", lambda self: None)
-    runner = JobRunner(tmp_path)
-    first = runner.start("first", ["unused"])
-    assert first.status == "pending"
-    with pytest.raises(RuntimeError, match="Job already running"):
-        runner.start("second", ["unused"])
-    assert runner.active is first
-
-
-def test_job_runner_streams_and_records_status(tmp_path):
-    import sys
-    import time
-
-    lines = []
-    runner = JobRunner(tmp_path, on_log=lines.append)
-    job = runner.start(
-        "short",
-        [sys.executable, "-c", "print('hello from job')"],
-    )
-    deadline = time.time() + 5
-    while job.status in {"pending", "running"} and time.time() < deadline:
-        time.sleep(0.05)
-    assert job.status == "succeeded"
-    assert job.exit_code == 0
-    assert "hello from job" in "\n".join(lines)
-    assert "job_finished" in (tmp_path / "training_events.jsonl").read_text()
-
-
 def test_textual_app_smoke(tmp_path):
     pytest.importorskip("textual")
     import asyncio
+    from textual.widgets import Button
+    from catanatron.gym.tui_jobs import BackgroundJob
     from examples.colonist_1v1_tui import make_textual_app
 
     async def run_app():
@@ -459,6 +429,16 @@ def test_textual_app_smoke(tmp_path):
             await pilot.pause(0.1)
             await pilot.press("7")
             await pilot.pause(0.1)
+            runner = app.runner
+            runner.active = BackgroundJob("pending", [], tmp_path / "run")
+            for button_id in ("launch-workflow", "run-eval"):
+                app.on_button_pressed(
+                    Button.Pressed(app.query_one(f"#{button_id}", Button))
+                )
+                assert app.runner is runner
+                assert app.run_dir == tmp_path / "run"
+            await pilot.press("c")
+            assert runner.active._cancel_requested
 
     asyncio.run(run_app())
 

@@ -347,7 +347,8 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
                         "Keyboard: 1 Runs, 2 Launch, 3 Monitor, 4 Ranking, 5 Evaluate, 6 Logs, 7 Backlog, r Refresh, c Cancel, q Quit\n\n"
                         "Protocols: fast = R/W/VP/F, milestone adds G:25, full adds expensive M/AB search.\n"
                         "Curricula move from teachers/baselines toward self-play and stronger opponents.\n"
-                        "The TUI writes commands, job status, and metrics into run_manifest.json and training_events.jsonl.",
+                        "Training metadata lives in run_manifest.json; job status lives in job_state.json. "
+                        "Both append events to training_events.jsonl. Cancelling stops the job in the background.",
                         classes="card",
                     )
             yield Footer()
@@ -471,6 +472,13 @@ def make_textual_app(runs_root: Path, run_dir: Path, refresh: float):
             self.update_command_previews()
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id in {"launch-workflow", "run-eval"}:
+                active = self.runner.active
+                if active is not None and not active.finished.is_set():
+                    self.notify(
+                        f"Job already running: {active.name}", severity="warning"
+                    )
+                    return
             if event.button.id == "launch-workflow":
                 values = self._launch_values()
                 self.run_dir = values["run_dir"]

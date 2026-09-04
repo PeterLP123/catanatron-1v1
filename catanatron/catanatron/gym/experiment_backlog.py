@@ -11,6 +11,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
+from catanatron.gym.tui_data import read_job_state
 
 WEAK_OPPONENT_GATES: dict[str, float] = {"R": 0.90, "W": 0.70, "VP": 0.60}
 REWARD_DELTA_GATE = 0.03
@@ -857,7 +858,10 @@ def _execution_status(experiment: Experiment, runs_root: Path) -> str:
         return "complete"
     if manifest.get("phase") == "done":
         return "complete"
-    if manifest.get("phase") in {
+    active_job = read_job_state(run_dir, manifest)
+    if active_job.get("status") in {"failed", "cancelled"}:
+        return "failed" if active_job["status"] == "failed" else "partial"
+    if active_job.get("status") in {"pending", "running"} or manifest.get("phase") in {
         "ppo_training",
         "initializing",
         "loading_resume",
@@ -865,9 +869,6 @@ def _execution_status(experiment: Experiment, runs_root: Path) -> str:
         "final_eval",
     }:
         return "running"
-    active_job = manifest.get("active_job")
-    if isinstance(active_job, Mapping) and active_job.get("status") == "failed":
-        return "failed"
     if manifest or run_dir.exists():
         return "partial"
     return "pending"

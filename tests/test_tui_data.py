@@ -3,7 +3,13 @@ import json
 
 import pytest
 
-from catanatron.gym.tui_data import _tail_lines, read_json_safe, read_jsonl_safe
+from catanatron.gym.tui_data import (
+    JOB_STATE_NAME,
+    _tail_lines,
+    read_json_safe,
+    read_jsonl_safe,
+    summarize_run,
+)
 
 
 @pytest.mark.parametrize("ending", [b"", b"\n", b"\r\n"])
@@ -47,3 +53,18 @@ def test_manifest_reader_handles_invalid_or_non_object_json(tmp_path, contents):
     path = tmp_path / "manifest.json"
     path.write_bytes(contents)
     assert read_json_safe(path, {}) == {}
+
+
+def test_job_state_takes_precedence_over_legacy_manifest(tmp_path):
+    (tmp_path / "run_manifest.json").write_text(
+        json.dumps({"active_job": {"name": "legacy", "status": "failed"}})
+    )
+    legacy = summarize_run(tmp_path)
+    assert legacy.active_job["name"] == "legacy"
+    assert "Last job failed: legacy" in legacy.warnings
+    (tmp_path / JOB_STATE_NAME).write_text(
+        json.dumps({"name": "new", "status": "succeeded"})
+    )
+    current = summarize_run(tmp_path)
+    assert current.active_job["name"] == "new"
+    assert "Last job failed: legacy" not in current.warnings
