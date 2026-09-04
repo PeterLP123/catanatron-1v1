@@ -24,6 +24,7 @@ from catanatron.gym.model_schema import (
 )
 from catanatron.models.enums import CITY, RESOURCES, SETTLEMENT, ActionType
 from catanatron.models.player import Color, Player
+from catanatron.players.checkpoint_manifest import verify_checkpoint
 from catanatron.players.learned import (
     TorchBcCheckpointPlayer,
     _preserve_inference_loader_rng,
@@ -159,46 +160,14 @@ class VisibleSameTurnPuctPlayer(Player):
         super().__init__(color)
         import torch
         from catanatron.gym.model_architectures import FactoredOutcomeCritic
-        from catanatron.gym.provenance import sha256_file
 
         manifest_path = Path(manifest).expanduser().resolve()
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         if payload.get("kind") != self.MANIFEST_KIND:
             raise ValueError(f"Unsupported visible PUCT manifest: {manifest_path}")
 
-        def resolve_checkpoint(label: str) -> Path:
-            key = f"{label}_checkpoint"
-            raw = Path(payload[key])
-            path = raw if raw.is_absolute() else manifest_path.parent / raw
-            path = path.resolve()
-            if not path.is_file():
-                raise FileNotFoundError(f"Missing visible PUCT {key}: {path}")
-            expected = payload.get(f"{key}_sha256")
-            actual = sha256_file(path)
-            if actual != expected:
-                raise ValueError(
-                    f"Visible PUCT {key} hash mismatch: {actual} != {expected}"
-                )
-            for suffix, hash_key in (
-                (".meta.json", f"{label}_metadata_sha256"),
-                (".schema.json", f"{label}_schema_sha256"),
-            ):
-                sidecar = path.with_suffix(suffix)
-                if not sidecar.is_file():
-                    raise FileNotFoundError(
-                        f"Missing visible PUCT {label} sidecar: {sidecar}"
-                    )
-                expected_sidecar = payload.get(hash_key)
-                actual_sidecar = sha256_file(sidecar)
-                if actual_sidecar != expected_sidecar:
-                    raise ValueError(
-                        f"Visible PUCT {label} sidecar hash mismatch: "
-                        f"{actual_sidecar} != {expected_sidecar}"
-                    )
-            return path
-
-        policy_path = resolve_checkpoint("policy")
-        critic_path = resolve_checkpoint("critic")
+        policy_path = verify_checkpoint(payload, manifest_path, "policy")
+        critic_path = verify_checkpoint(payload, manifest_path, "critic")
         self.num_simulations = int(payload["num_simulations"])
         self.c_puct = float(payload["c_puct"])
         self.leaf_evaluator = payload.get("leaf_evaluator", "outcome_critic")

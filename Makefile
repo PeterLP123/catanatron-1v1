@@ -1,17 +1,20 @@
-.PHONY: install lint test test-installed test-1v1 test-gpu-ready smoke train evaluate tui
+.PHONY: install lint test benchmark test-installed test-1v1 test-gpu-ready smoke train evaluate tui
 
-PYTHON ?= $(shell if [ -x venv/bin/python ]; then echo venv/bin/python; else command -v python3; fi)
+PYTHON ?= $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; elif [ -x venv/bin/python ]; then echo venv/bin/python; else command -v python3; fi)
 RUFF ?= $(shell if $(PYTHON) -m ruff --version >/dev/null 2>&1; then echo "$(PYTHON) -m ruff"; elif python3 -m ruff --version >/dev/null 2>&1; then echo "python3 -m ruff"; else echo "$(PYTHON) -m ruff"; fi)
 RUN_DIR ?= runs/colonist_1v1
 
 install:
-	$(PYTHON) -m pip install -e ".[dev,gym,colonist,tui]"
+	$(PYTHON) -m pip install -c requirements/training-constraints.txt -e ".[dev,gym,colonist,tui]"
 
 lint:
-	$(RUFF) check catanatron/catanatron examples tests
+	$(RUFF) check catanatron/catanatron examples tests benchmarks
 
 test:
 	$(PYTHON) -m pytest
+
+benchmark:
+	$(PYTHON) -m pytest benchmarks
 
 test-installed:
 	@PYTHON_BIN="$$(command -v "$(PYTHON)")"; \
@@ -33,13 +36,13 @@ test-gpu-ready:
 		tests/machine_learning/test_mcts.py
 
 smoke:
-	$(PYTHON) examples/colonist_1v1_train.py --preset smoke --run-dir $(RUN_DIR) --skip-final-eval
+	$(PYTHON) examples/colonist_1v1_train.py --preset smoke --run-dir "$(RUN_DIR)" --skip-final-eval
 
 train:
-	$(PYTHON) examples/colonist_1v1_train.py --preset standard --run-dir $(RUN_DIR) --mixed-league --tensorboard
+	$(PYTHON) examples/colonist_1v1_train.py --preset standard --run-dir "$(RUN_DIR)" --mixed-league --tensorboard
 
 evaluate:
-	$(PYTHON) examples/colonist_1v1_evaluate.py --agent L:$(RUN_DIR)/colonist_maskable_ppo.zip --benchmark --protocol full --gates --report $(RUN_DIR)/evaluation.json
+	$(PYTHON) examples/colonist_1v1_evaluate.py --agent "L:$(RUN_DIR)/colonist_maskable_ppo.zip" --benchmark --protocol full --gates --report "$(RUN_DIR)/evaluation.json"
 
 tui:
-	$(PYTHON) examples/colonist_1v1_tui.py --run-dir $(RUN_DIR)
+	$(PYTHON) examples/colonist_1v1_tui.py --run-dir "$(RUN_DIR)"

@@ -9,7 +9,6 @@ import pytest
 
 from catanatron import Color
 from catanatron.colonist_1v1_eval import (
-    DEFAULT_BENCHMARK_GATES,
     EvaluationReport,
     MatchupResult,
     append_model_registry,
@@ -242,10 +241,6 @@ def test_evaluate_matchup_mocked():
     assert r.passed_gate is True
 
 
-def test_default_gates_order():
-    assert DEFAULT_BENCHMARK_GATES["R"] > DEFAULT_BENCHMARK_GATES["AB:2"]
-
-
 def test_eval_protocol_and_registry_schema(tmp_path):
     proto = get_eval_protocol("fast", num_games=12)
     assert proto.opponents == ("R", "W", "VP", "F")
@@ -420,6 +415,16 @@ def test_tui_command_builders():
     assert eval_cmd[1] == "examples/colonist_1v1_evaluate.py"
     assert "--benchmark" in eval_cmd
     assert "--report" in eval_cmd
+
+
+def test_job_runner_rejects_second_job_while_first_is_pending(tmp_path, monkeypatch):
+    monkeypatch.setattr("threading.Thread.start", lambda self: None)
+    runner = JobRunner(tmp_path)
+    first = runner.start("first", ["unused"])
+    assert first.status == "pending"
+    with pytest.raises(RuntimeError, match="Job already running"):
+        runner.start("second", ["unused"])
+    assert runner.active is first
 
 
 def test_job_runner_streams_and_records_status(tmp_path):

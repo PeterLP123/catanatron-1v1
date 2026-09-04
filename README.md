@@ -70,13 +70,15 @@ python examples/colonist_1v1_train.py \
   --preset standard --run-dir runs/my_bot \
   --bc-checkpoint runs/my_bot/bc.pt --tensorboard
 
-# 4. Evaluate against the milestone opponent battery.
+# 4. Evaluate the BC checkpoint against the milestone opponent battery.
 python examples/colonist_1v1_evaluate.py \
-  --agent L:runs/my_bot/colonist_maskable_ppo.zip \
+  --agent T:runs/my_bot/bc.pt \
   --protocol milestone --gates --eval-kind final \
   --gate-mode lower_bound \
   --report runs/my_bot/final_benchmark.json
 ```
+
+If you run the optional PPO step, evaluate it with `--agent L:runs/my_bot/colonist_maskable_ppo.zip`.
 
 See [the training guide](docs/TRAINING.md) for feature profiles, BC objectives, distillation, PPO settings, evidence suites, artifacts, and troubleshooting. Historical model numbers recorded before the 2026-07-12 evaluation-accounting fix are provisional; see [the results log](docs/RESULTS_LOG.md) before comparing checkpoints.
 
@@ -131,6 +133,7 @@ Run `catanatron-play --help-players` for the complete built-in list.
 | Command | Purpose |
 |---|---|
 | `make test` | Run the retained test suite |
+| `make benchmark` | Run optional engine and player speed measurements |
 | `make test-1v1` | Run rules, Gym, training, and evaluation tests |
 | `make test-installed` | Verify imports from outside the checkout |
 | `make test-gpu-ready` | Run CPU checks required before a GPU experiment |
@@ -149,6 +152,7 @@ Generated datasets, checkpoints, TensorBoard events, and run metadata belong und
 | `catanatron/catanatron/` | Engine, rules adapter, players, Gym environment, training utilities |
 | `examples/colonist_1v1_*.py` | Data, BC, distillation, PPO, evaluation, evidence, and TUI entry points |
 | `tests/` | Engine and 1v1 regression tests |
+| `benchmarks/` | Optional speed measurements, separate from regression tests |
 | `docs/` | Rules, training, and architecture documentation |
 | `requirements/training-constraints.txt` | Validated training compatibility envelope |
 | `scripts/local_strength_eval.sh` | Reproducible local end-to-end pipeline |

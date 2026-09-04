@@ -137,15 +137,6 @@ def leaf_win_probability(
     return value_target_components(game, color, pos_value_fn)["win_prob"]
 
 
-def make_f_value_fn(value_fn_builder_name: str = "base_fn", params=None) -> ValueFn:
-    """Build an F value function (defaults to the ``base_fn`` weights).
-
-    Pass ``"contender_fn"`` (or the CLI ``"C"`` alias is resolved upstream) to use
-    the tuned contender weights instead.
-    """
-    return get_value_fn(value_fn_builder_name, params)
-
-
 def state_signature(game: Game, color: Color):
     """A cheap, hashable key capturing everything ``f_leaf_value`` reads.
 
@@ -178,7 +169,7 @@ def f_leaf_value(game: Game, color: Color, value_fn: Optional[ValueFn] = None) -
         return 1.0 if winner == color else 0.0
 
     if value_fn is None:
-        value_fn = make_f_value_fn()
+        value_fn = get_value_fn("base_fn", None)
 
     v_me = value_fn(game, color)
     opponents = [c for c in game.state.colors if c != color]
@@ -209,7 +200,7 @@ def action_value(
     from catanatron.players.tree_search_utils import execute_spectrum
 
     if value_fn is None:
-        value_fn = make_f_value_fn()
+        value_fn = get_value_fn("base_fn", None)
     outcomes = execute_spectrum(game, action)
     total = 0.0
     weighted = 0.0
@@ -231,5 +222,5 @@ def candidate_values(
     decision (see :func:`action_value`).
     """
     if value_fn is None:
-        value_fn = make_f_value_fn()
+        value_fn = get_value_fn("base_fn", None)
     return [action_value(game, a, color, value_fn) for a in game.playable_actions]

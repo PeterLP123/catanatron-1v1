@@ -986,10 +986,6 @@ def main(argv: list[str] | None = None) -> None:
 
         return env_fn
 
-    def env_fn():
-        # Kept for single-env use and backward compatibility with tests/importers.
-        return make_env_fn(0)()
-
     vec_fallback_reason = None
     if resolved_vec_env == "subproc":
         from stable_baselines3.common.vec_env import SubprocVecEnv
@@ -1021,7 +1017,7 @@ def main(argv: list[str] | None = None) -> None:
         env = DummyVecEnv([make_env_fn(i) for i in range(args.n_envs)])
         resolved_start_method = None
     else:
-        env = env_fn()
+        env = make_env_fn(0)()
         resolved_start_method = None
 
     training_manifest.update(

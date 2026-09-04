@@ -7,20 +7,18 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, BinaryIO, Iterable, Optional, Sequence
 
+from catanatron.file_utils import write_json_atomic
 from catanatron.gym.colonist_training import (
     EVENTS_NAME,
     MANIFEST_NAME,
     MODEL_REGISTRY_NAME,
+    utc_now_iso,
 )
 
 
 OPPONENT_COLUMNS: tuple[str, ...] = ("R", "W", "VP", "F", "G:25", "M:200", "AB:2")
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def parse_timestamp(value: Any) -> Optional[datetime]:
@@ -50,27 +48,53 @@ def format_duration(seconds: Optional[float]) -> str:
 
 def read_json_safe(path: Path, default: Any) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, OSError):
         return default
+    if isinstance(default, dict) and not isinstance(payload, dict):
+        return default
+    return payload
+
+
+def _tail_lines(source: BinaryIO, limit: int) -> list[bytes]:
+    """Read only the end of a log, retaining complete UTF-8 lines."""
+    position = source.seek(0, os.SEEK_END)
+    chunks = []
+    newlines = 0
+    while position > 0 and newlines <= limit:
+        size = min(position, 8192)
+        position -= size
+        source.seek(position)
+        chunk = source.read(size)
+        chunks.append(chunk)
+        newlines += chunk.count(b"\n")
+    return b"".join(reversed(chunks)).splitlines()[-limit:]
 
 
 def read_jsonl_safe(path: Path, *, limit: Optional[int] = None) -> list[dict[str, Any]]:
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except (FileNotFoundError, OSError):
+    """Read object rows, tolerating incomplete or malformed log entries.
+
+    ``limit`` counts physical lines, including any partially written last line.
+    """
+    if limit is not None and limit < 0:
+        raise ValueError("limit must be nonnegative")
+    if limit == 0:
         return []
-    if limit is not None:
-        lines = lines[-limit:]
     rows: list[dict[str, Any]] = []
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            rows.append(json.loads(line))
-        except json.JSONDecodeError:
-            # Ignore a partially-written last line while training is appending.
-            continue
+    try:
+        with path.open("rb") as source:
+            lines = source if limit is None else _tail_lines(source, limit)
+            for line in lines:
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                if isinstance(row, dict):
+                    rows.append(row)
+    except OSError:
+        return []
     return rows
 
 
@@ -94,7 +118,7 @@ def update_manifest(run_dir: Path, **updates: Any) -> dict[str, Any]:
     manifest = read_json_safe(path, {})
     manifest.update(updates)
     manifest["updated_at"] = utc_now_iso()
-    path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    write_json_atomic(path, manifest)
     return manifest
 
 

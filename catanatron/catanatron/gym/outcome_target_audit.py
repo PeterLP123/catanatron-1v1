@@ -252,12 +252,6 @@ def _load_input_frame(path: Path):
     return frame, shards
 
 
-def resolve_outcome_shards(path: Path) -> list[Path]:
-    """Resolve and integrity-check one outcome corpus input."""
-    shards, _ = _resolve_input(Path(path))
-    return shards
-
-
 def load_outcome_target_index(
     inputs: Sequence[Path],
 ) -> tuple[list[Path], dict[tuple[str, str, int], tuple[float, float]]]:

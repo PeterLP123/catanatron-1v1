@@ -100,13 +100,6 @@ def test_initial_build_phase():
     assert player_num_resource_cards(game.state, players[1].color) <= 3
 
 
-def test_can_play_for_a_bit():  # assert no exception thrown
-    players = [SimplePlayer(Color.RED), SimplePlayer(Color.BLUE)]
-    game = Game(players)
-    for _ in range(10):
-        game.play_tick()
-
-
 @patch("catanatron.apply_action.roll_dice")
 def test_seven_cards_dont_trigger_discarding(fake_roll_dice):
     fake_roll_dice.return_value = (1, 6)

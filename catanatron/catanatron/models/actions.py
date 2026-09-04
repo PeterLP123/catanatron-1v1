@@ -3,8 +3,6 @@ Move-generation functions (these return a list of actions that can be taken
 by current player). Main function is generate_playable_actions.
 """
 
-import operator as op
-from functools import reduce
 from typing import Any, Dict, List, Set, Tuple, Union
 
 from catanatron.models.decks import (
@@ -293,14 +291,6 @@ def discard_possibilities(state: State, color) -> List[Action]:
         for resource in RESOURCES
         if player_num_resource_cards(state, color, resource) > 0
     ]
-
-
-def ncr(n, r):
-    """n choose r. helper for discard_possibilities"""
-    r = min(r, n - r)
-    numer = reduce(op.mul, range(n, n - r, -1), 1)
-    denom = reduce(op.mul, range(1, r + 1), 1)
-    return numer // denom
 
 
 def maritime_trade_possibilities(state, color) -> List[Action]:

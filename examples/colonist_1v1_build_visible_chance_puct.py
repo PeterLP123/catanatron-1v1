@@ -5,10 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 
+from catanatron.file_utils import write_json_atomic
 from catanatron.gym.provenance import sha256_file
+from catanatron.players.checkpoint_manifest import relative_path, verify_checkpoint
 from catanatron.models.player import Color
 from catanatron.players.visible_chance_puct import (
     PUBLIC_CHANCE_ACTIONS,
@@ -24,15 +25,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-parent-sha256", required=True)
     parser.add_argument("--output", type=Path, required=True)
     return parser
-
-
-def _resolve_from_manifest(manifest: Path, raw: str) -> Path:
-    path = Path(raw)
-    return (path if path.is_absolute() else manifest.parent / path).resolve()
-
-
-def _relative(path: Path, parent: Path) -> str:
-    return os.path.relpath(path.resolve(), parent.resolve())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -54,31 +46,18 @@ def main(argv: list[str] | None = None) -> int:
     if parent.get("chance_spectrum_usage") != "forbidden":
         raise ValueError("Parent search must forbid chance spectra")
 
-    policy = _resolve_from_manifest(parent_manifest, parent["policy_checkpoint"])
-    critic = _resolve_from_manifest(parent_manifest, parent["critic_checkpoint"])
-    for label, path in (("policy", policy), ("critic", critic)):
-        if not path.is_file():
-            raise FileNotFoundError(f"Missing parent {label} checkpoint: {path}")
-        if sha256_file(path) != parent[f"{label}_checkpoint_sha256"]:
-            raise ValueError(f"Parent {label} checkpoint hash mismatch")
-        for suffix, key in (
-            (".meta.json", f"{label}_metadata_sha256"),
-            (".schema.json", f"{label}_schema_sha256"),
-        ):
-            sidecar = path.with_suffix(suffix)
-            if not sidecar.is_file() or sha256_file(sidecar) != parent[key]:
-                raise ValueError(f"Parent {label} sidecar hash mismatch: {sidecar}")
+    policy = verify_checkpoint(parent, parent_manifest, "policy")
+    critic = verify_checkpoint(parent, parent_manifest, "critic")
 
     if args.output.exists():
         raise FileExistsError(f"Refusing to overwrite manifest: {args.output}")
-    args.output.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema_version": "1.0",
         "kind": "visible_public_chance_puct",
-        "parent_manifest": _relative(parent_manifest, args.output.parent),
+        "parent_manifest": relative_path(parent_manifest, args.output.parent),
         "parent_manifest_sha256": parent_hash,
-        "policy_checkpoint": _relative(policy, args.output.parent),
-        "critic_checkpoint": _relative(critic, args.output.parent),
+        "policy_checkpoint": relative_path(policy, args.output.parent),
+        "critic_checkpoint": relative_path(critic, args.output.parent),
         "num_simulations": parent["num_simulations"],
         "c_puct": parent["c_puct"],
         "leaf_evaluator": parent["leaf_evaluator"],
@@ -109,12 +88,12 @@ def main(argv: list[str] | None = None) -> int:
     ):
         payload[key] = parent[key]
 
-    temporary = args.output.with_name(f".{args.output.name}.tmp")
-    temporary.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    write_json_atomic(
+        args.output,
+        payload,
+        overwrite=False,
+        validate=lambda path: VisibleChancePuctPlayer(Color.BLUE, path),
     )
-    VisibleChancePuctPlayer(Color.BLUE, temporary)
-    os.replace(temporary, args.output)
     print(
         f"Built visible chance PUCT manifest: {args.output} "
         f"sha256={sha256_file(args.output)}"

@@ -42,6 +42,8 @@ flowchart TD
 | `game.py`, `state.py`, `apply_action.py`, `state_functions.py` | Game lifecycle and state transitions |
 | `models/` | Board, map, actions, cards, players, and balanced-dice primitives |
 | `players/` | Random, heuristic, chance-aware search, and checkpoint-backed players |
+| `players/checkpoint_manifest.py` | Portable checkpoint references and required metadata/schema hash checks |
+| `file_utils.py` | Atomic JSON writes and validated manifest publication without overwrites |
 | `colonist_1v1.py` | Two-player rule settings and game factory |
 | `cli/` | Batch simulation, player specs, and outcome accumulators |
 | `features.py` | Versioned `raw` and `public_derived` vector profiles |
@@ -173,10 +175,13 @@ artifacts stay under ignored local directories except compact validated result s
 
 ## Verification layers
 
-- `make test-1v1` covers rules, Gym, features, schema loading, BC, distillation, backlog,
-  artifacts, and evaluation integrity.
-- `make test` also covers the generic engine, search players, replay determinism, CLI, and
-  performance checks.
+- `make test-1v1` covers the rules preset, shared training utilities, Gym training,
+  evaluation helpers, and dashboard integration.
+- `make test-gpu-ready` adds dataset, launcher, backlog, and search checks required
+  before a GPU experiment.
+- `make test` also covers the generic engine, search players, replay determinism, and CLI.
+- `make benchmark` runs optional speed measurements under `benchmarks/`. Player benchmarks
+  start from a fresh seeded game for each measured round; these timings are not regression gates.
 - `make test-installed` verifies imports from outside the checkout so local path leakage does
   not hide packaging failures.
 - `.github/workflows/ci.yml` installs the constrained package on Python 3.11, then runs the

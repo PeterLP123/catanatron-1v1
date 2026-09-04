@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import os
 from pathlib import Path
 from typing import Any, Mapping
 
+from catanatron.file_utils import write_json_atomic
 from catanatron.gym.bc_training import (
     hash_parquet_shards,
     resolve_torch_device,
@@ -61,15 +61,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--run-dir", type=Path, required=True)
     return parser
-
-
-def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        json.dumps(dict(payload), indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    os.replace(temporary, path)
 
 
 def _move_batch(batch: Mapping[str, Any], device) -> dict[str, Any]:
@@ -326,9 +317,9 @@ def main(argv: list[str] | None = None) -> int:
         "all_offline_gates_passed": all(gate["passed"] for gate in gates),
     }
     metadata_path = args.out.with_suffix(".meta.json")
-    _atomic_json(metadata_path, metadata)
-    _atomic_json(args.run_dir / "training_events.json", {"events": events})
-    _atomic_json(args.run_dir / "offline_gate_report.json", metadata)
+    write_json_atomic(metadata_path, metadata)
+    write_json_atomic(args.run_dir / "training_events.json", {"events": events})
+    write_json_atomic(args.run_dir / "offline_gate_report.json", metadata)
     print(
         f"selected_epoch={best_epoch} test_brier={test_metrics['win']['brier']:.6f} "
         f"test_auc={test_metrics['win']['auc']:.6f} "

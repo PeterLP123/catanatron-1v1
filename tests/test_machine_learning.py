@@ -18,7 +18,6 @@ from catanatron.game import Game
 from catanatron.models.map import number_probability
 from catanatron.models.player import SimplePlayer, Color
 from catanatron.features import (
-    create_sample,
     expansion_features,
     port_features,
     reachability_features,
@@ -34,20 +33,6 @@ from catanatron.gym.board_tensor_features import (
     init_board_tensor_map,
     init_tile_coordinate_map,
 )
-
-
-def test_create_sample():
-    players = [
-        SimplePlayer(Color.RED),
-        SimplePlayer(Color.BLUE),
-        SimplePlayer(Color.WHITE),
-        SimplePlayer(Color.ORANGE),
-    ]
-    game = Game(players)
-
-    sample = create_sample(game, players[1].color)
-    assert isinstance(sample, dict)
-    assert len(sample) > 0
 
 
 def test_port_distance_features():

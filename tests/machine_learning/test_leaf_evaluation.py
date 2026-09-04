@@ -8,7 +8,6 @@ from catanatron.players.leaf_evaluation import (
     candidate_values,
     f_leaf_value,
     leaf_win_probability,
-    make_f_value_fn,
     make_position_value_fn,
     state_signature,
     value_target_components,
@@ -71,12 +70,6 @@ def test_leaf_value_orders_with_value_function():
     assert (leaf_red < 0.5) == (v_red < v_blue)
 
 
-def test_make_f_value_fn_is_callable():
-    game = make_midgame_1v1()
-    value_fn = make_f_value_fn()
-    assert isinstance(value_fn(game, Color.RED), float)
-
-
 def test_state_signature_is_hashable_and_stable_under_copy():
     game = make_midgame_1v1()
     sig = state_signature(game, Color.RED)
@@ -95,7 +88,7 @@ def test_state_signature_differs_by_color_and_state():
 def test_state_signature_determines_leaf_value():
     """Equal signatures must imply equal leaf values (cache correctness)."""
     game = make_midgame_1v1()
-    value_fn = make_f_value_fn()
+    value_fn = get_value_fn("base_fn", None)
     a = f_leaf_value(game, Color.RED, value_fn)
     b = f_leaf_value(game.copy(), Color.RED, value_fn)
     assert state_signature(game, Color.RED) == state_signature(game.copy(), Color.RED)
@@ -128,7 +121,7 @@ def test_candidate_values_align_with_legal_actions():
 def test_action_value_matches_candidate_values_entry():
     game = make_choice_1v1()
     color = game.state.current_color()
-    value_fn = make_f_value_fn()
+    value_fn = get_value_fn("base_fn", None)
     values = candidate_values(game, color, value_fn)
     first = action_value(game, game.playable_actions[0], color, value_fn)
     assert first == values[0]

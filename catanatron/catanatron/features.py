@@ -27,18 +27,6 @@ from catanatron.game import Game
 
 
 # ===== Helpers
-def is_building(game, node_id, color, building_type):
-    building = game.state.board.buildings.get(node_id, None)
-    if building is None:
-        return False
-    else:
-        return building[0] == color and building[1] == building_type
-
-
-def is_road(game, edge, color):
-    return game.state.board.get_edge_color(edge) == color
-
-
 @functools.lru_cache(1024)
 def iter_players(colors: Tuple[Color], p0_color: Color):
     """Iterator: for i, player in iter_players(game, p0.color)"""
@@ -540,14 +528,6 @@ def create_sample(game, p0_color, feature_profile="raw"):
     for extractor in extractors:
         record.update(extractor(game, p0_color))
     return record
-
-
-def create_sample_vector(game, p0_color, features=None, feature_profile="raw"):
-    features = features or get_feature_ordering(
-        len(game.state.colors), feature_profile=feature_profile
-    )
-    sample_dict = create_sample(game, p0_color, feature_profile=feature_profile)
-    return [float(sample_dict[i]) for i in features]
 
 
 @functools.lru_cache(maxsize=None)

@@ -111,19 +111,24 @@ CLI_PLAYERS = [
 ]
 
 
-def parse_cli_string(player_string):
+def parse_cli_string(player_string: str):
+    """Build players in seat order, rejecting invalid specs before construction."""
+    player_keys = [key.strip() for key in player_string.split(",")]
+    colors = list(Color)
+    if len(player_keys) > len(colors):
+        raise ValueError(f"At most {len(colors)} players are supported")
+    specifications = []
+    for key in player_keys:
+        code, *params = key.split(":")
+        entry = next((player for player in CLI_PLAYERS if player.code == code), None)
+        if entry is None:
+            raise ValueError(
+                f"Unknown player code {code!r}; use --help-players for supported codes"
+            )
+        specifications.append((entry, params))
     players = []
-    player_keys = player_string.split(",")
-    colors = [c for c in Color]
-    for i, key in enumerate(player_keys):
-        parts = key.split(":")
-        code = parts[0]
-        for cli_player in CLI_PLAYERS:
-            if cli_player.code == code:
-                params = [colors[i]] + parts[1:]
-                player = cli_player.import_fn(*params)
-                players.append(player)
-                break
+    for color, (entry, params) in zip(colors, specifications):
+        players.append(entry.import_fn(color, *params))
     return players
 
 

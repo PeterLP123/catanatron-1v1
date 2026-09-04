@@ -64,7 +64,7 @@ class JobRunner:
 
     def start(self, name: str, command: Sequence[str]) -> BackgroundJob:
         with self._lock:
-            if self.active is not None and self.active.status == "running":
+            if self.active is not None and self.active.status in {"pending", "running"}:
                 raise RuntimeError(f"Job already running: {self.active.name}")
             job = BackgroundJob(name=name, command=list(command), run_dir=self.run_dir)
             self.active = job

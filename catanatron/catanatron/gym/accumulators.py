@@ -25,7 +25,6 @@ from catanatron.gym.utils import (
     populate_matrices,
     simple_total_return,
 )
-from catanatron.utils import format_secs
 
 
 class ReinforcementLearningAccumulator(GameAccumulator):
@@ -86,10 +85,11 @@ class ReinforcementLearningAccumulator(GameAccumulator):
         if score:
             from catanatron.players.leaf_evaluation import (
                 action_value,
-                make_f_value_fn,
             )
 
-            value_fn = make_f_value_fn(self.value_fn_name)
+            from catanatron.players.value import get_value_fn
+
+            value_fn = get_value_fn(self.value_fn_name, None)
 
         legal_indices = []
         cand_values = []
@@ -244,7 +244,7 @@ class ReinforcementLearningAccumulator(GameAccumulator):
             results["main_df"] = main_df
         print(
             "Building matrices at took",
-            format_secs(time.time() - t1),
+            f"{time.time() - t1:.3f} secs",
         )
         return results
 
@@ -284,7 +284,7 @@ class CsvDataAccumulator(ReinforcementLearningAccumulator):
         print(
             f"Saved matrices to {self.output}{' (including board tensors)' if self.include_board_tensor else ''} with shapes: "
             f"main={main_df.shape}, samples={samples_df.shape}, actions={actions_df.shape}, "
-            f"rewards={returns_df.shape} in {format_secs(time.time() - t1)}"
+            f"rewards={returns_df.shape} in {time.time() - t1:.3f} secs"
         )
         return samples_df, board_tensors_df, actions_df, returns_df
 

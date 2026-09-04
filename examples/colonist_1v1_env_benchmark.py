@@ -19,10 +19,6 @@ except ModuleNotFoundError:  # Direct execution: sys.path starts at examples/.
     from colonist_1v1_train import make_colonist_env
 
 
-def _build_env(seed: int):
-    return make_colonist_env(seed=seed, randomize_seats=True)
-
-
 def benchmark_mode(
     mode: str,
     *,
@@ -31,7 +27,10 @@ def benchmark_mode(
     seed: int,
     start_method: str | None,
 ) -> dict:
-    factories = [partial(_build_env, seed + rank) for rank in range(n_envs)]
+    factories = [
+        partial(make_colonist_env, seed=seed + rank, randomize_seats=True)
+        for rank in range(n_envs)
+    ]
     if mode == "subproc":
         env = SubprocVecEnv(factories, start_method=start_method)
     else:

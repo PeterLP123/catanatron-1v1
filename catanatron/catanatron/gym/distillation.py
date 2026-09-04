@@ -26,6 +26,7 @@ from typing import Any, Iterator, Mapping, Sequence
 import numpy as np
 
 from catanatron.features import create_sample
+from catanatron.file_utils import write_json_atomic
 from catanatron.gym.bc_training import (
     VP_MARGIN_TARGET_COLUMN,
     WIN_VALUE_TARGET_COLUMN,
@@ -403,16 +404,6 @@ class DistillationDecisionRecorder:
         return behavior_action, row
 
 
-def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        json.dumps(dict(payload), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    os.replace(temporary, path)
-
-
 class DistillationDatasetWriter:
     """Stream games into immutable iteration shards and rebuild the replay index."""
 
@@ -550,7 +541,7 @@ class DistillationDatasetWriter:
             "shards": self._shards,
             "metadata": self.metadata,
         }
-        _atomic_write_json(manifest_path, manifest)
+        write_json_atomic(manifest_path, manifest)
         rebuild_aggregate_manifest(self.root)
         return manifest_path
 
@@ -597,7 +588,7 @@ def rebuild_aggregate_manifest(root: str | Path) -> Path:
         "games": total_games,
     }
     output = root_path / "manifest.json"
-    _atomic_write_json(output, aggregate)
+    write_json_atomic(output, aggregate)
     return output
 
 

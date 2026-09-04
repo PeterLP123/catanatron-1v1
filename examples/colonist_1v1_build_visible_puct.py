@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import argparse
-import json
-import os
+import math
 from pathlib import Path
 
+from catanatron.file_utils import write_json_atomic
 from catanatron.gym.provenance import sha256_file
+from catanatron.players.checkpoint_manifest import checkpoint_fields
 from catanatron.models.player import Color
 from catanatron.players.visible_puct import (
     FORBIDDEN_SEARCH_ACTIONS,
@@ -32,39 +33,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _relative(path: Path, parent: Path) -> str:
-    return os.path.relpath(path.resolve(), parent.resolve())
-
-
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    policy = args.policy.resolve()
-    critic = args.critic.resolve()
-    for label, path in (("policy", policy), ("critic", critic)):
-        if not path.is_file():
-            raise FileNotFoundError(f"Missing {label} checkpoint: {path}")
-        for suffix in (".meta.json", ".schema.json"):
-            sidecar = path.with_suffix(suffix)
-            if not sidecar.is_file():
-                raise FileNotFoundError(f"Missing {label} sidecar: {sidecar}")
+    policy_fields = checkpoint_fields(args.policy, "policy", args.output.parent)
+    critic_fields = checkpoint_fields(args.critic, "critic", args.output.parent)
     if args.num_simulations < 1:
         raise ValueError("num-simulations must be positive")
-    if args.c_puct <= 0:
-        raise ValueError("c-puct must be positive")
+    if not math.isfinite(args.c_puct) or args.c_puct <= 0:
+        raise ValueError("c-puct must be finite and positive")
     if args.output.exists():
         raise FileExistsError(f"Refusing to overwrite manifest: {args.output}")
-    args.output.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema_version": "1.0",
         "kind": "visible_same_turn_puct",
-        "policy_checkpoint": _relative(policy, args.output.parent),
-        "policy_checkpoint_sha256": sha256_file(policy),
-        "policy_metadata_sha256": sha256_file(policy.with_suffix(".meta.json")),
-        "policy_schema_sha256": sha256_file(policy.with_suffix(".schema.json")),
-        "critic_checkpoint": _relative(critic, args.output.parent),
-        "critic_checkpoint_sha256": sha256_file(critic),
-        "critic_metadata_sha256": sha256_file(critic.with_suffix(".meta.json")),
-        "critic_schema_sha256": sha256_file(critic.with_suffix(".schema.json")),
+        **policy_fields,
+        **critic_fields,
         "num_simulations": args.num_simulations,
         "c_puct": args.c_puct,
         "leaf_evaluator": args.leaf_evaluator,
@@ -81,12 +64,12 @@ def main(argv: list[str] | None = None) -> int:
         "opponent_turn_expansion": "forbidden",
         "final_move_rule": "visits_then_q_then_prior_then_action_id",
     }
-    temporary = args.output.with_name(f".{args.output.name}.tmp")
-    temporary.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    write_json_atomic(
+        args.output,
+        payload,
+        overwrite=False,
+        validate=lambda path: VisibleSameTurnPuctPlayer(Color.BLUE, path),
     )
-    VisibleSameTurnPuctPlayer(Color.BLUE, temporary)
-    os.replace(temporary, args.output)
     print(
         f"Built visible PUCT manifest: {args.output} sha256={sha256_file(args.output)}"
     )

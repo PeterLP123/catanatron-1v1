@@ -17,6 +17,7 @@ from uuid import uuid4
 
 import numpy as np
 
+from catanatron.file_utils import write_json_atomic
 from catanatron.models.player import Color, Player
 
 RUN_MARKER_NAME = ".colonist_run_started"
@@ -571,10 +572,7 @@ class BcCheckpointMeta:
     expected_dataset_contract: dict[str, Any] = field(default_factory=dict)
 
     def save(self, path: Path) -> None:
-        path.write_text(
-            json.dumps(asdict(self), indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        write_json_atomic(path, asdict(self))
 
 
 def load_bc_checkpoint_meta(path: Path) -> Optional[BcCheckpointMeta]:
@@ -614,9 +612,7 @@ class CheckpointLeague:
         return []
 
     def _save_index(self) -> None:
-        tmp = self._index_path.with_name(f".{self._index_path.name}.tmp")
-        tmp.write_text(json.dumps(self._entries, indent=2))
-        os.replace(tmp, self._index_path)
+        write_json_atomic(self._index_path, self._entries)
 
     def _archive_checkpoint(self, checkpoint: Path, *, reason: str) -> None:
         """Move a checkpoint and schema sidecar into collision-safe storage."""
@@ -833,12 +829,7 @@ def make_mixed_opponent_factory(
         return player
 
     def _factory() -> Player:
-        nonlocal \
-            teacher_codes, \
-            league_weight, \
-            teacher_weight, \
-            baseline_weight, \
-            baseline_code
+        nonlocal teacher_codes, league_weight, teacher_weight, baseline_weight, baseline_code
         if curriculum is not None:
             stage = curriculum.stage_for(step_getter() if step_getter else 0)
             teacher_codes = stage.teacher_codes
@@ -935,9 +926,7 @@ class TrainingRunTracker:
 
     def write_manifest(self) -> None:
         self._manifest["updated_at"] = utc_now_iso()
-        self.manifest_path.write_text(
-            json.dumps(self._manifest, indent=2, sort_keys=True)
-        )
+        write_json_atomic(self.manifest_path, self._manifest)
 
     def update_manifest(self, **kwargs: Any) -> None:
         self._manifest.update(kwargs)
@@ -986,6 +975,4 @@ def write_dataset_metadata(
     if extra:
         meta.update(extra)
     path = output_dir / "dataset_meta.json"
-    tmp = output_dir / ".dataset_meta.json.tmp"
-    tmp.write_text(json.dumps(meta, indent=2, sort_keys=True))
-    os.replace(tmp, path)
+    write_json_atomic(path, meta)

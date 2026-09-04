@@ -25,6 +25,7 @@ from catanatron.gym.model_schema import (
     validate_model_schema,
 )
 from catanatron.models.player import Color, Player
+from catanatron.players.checkpoint_manifest import verify_checkpoint
 
 if TYPE_CHECKING:
     from catanatron.game import Game
@@ -291,7 +292,6 @@ class OpeningSpecialistCheckpointPlayer(Player):
 
     def __init__(self, color: Color, manifest: Union[str, os.PathLike[str]]):
         super().__init__(color)
-        from catanatron.gym.provenance import sha256_file
         from catanatron.players.value import ValueFunctionPlayer
 
         manifest_path = Path(manifest).expanduser().resolve()
@@ -312,41 +312,7 @@ class OpeningSpecialistCheckpointPlayer(Player):
         if payload.get("policy_frozen") is not True:
             raise ValueError("Opening-specialist policy must be frozen")
 
-        raw_policy = Path(payload["policy_checkpoint"])
-        policy_path = (
-            raw_policy
-            if raw_policy.is_absolute()
-            else manifest_path.parent / raw_policy
-        ).resolve()
-        if not policy_path.is_file():
-            raise FileNotFoundError(
-                f"Missing opening-specialist policy checkpoint: {policy_path}"
-            )
-        expected_checkpoint_hash = payload.get("policy_checkpoint_sha256")
-        actual_checkpoint_hash = sha256_file(policy_path)
-        if actual_checkpoint_hash != expected_checkpoint_hash:
-            raise ValueError(
-                "Opening-specialist policy checkpoint hash mismatch: "
-                f"{actual_checkpoint_hash} != {expected_checkpoint_hash}"
-            )
-        for suffix, hash_key in (
-            (".meta.json", "policy_metadata_sha256"),
-            (".schema.json", "policy_schema_sha256"),
-        ):
-            sidecar = policy_path.with_suffix(suffix)
-            if not sidecar.is_file():
-                raise FileNotFoundError(
-                    f"Missing opening-specialist policy sidecar: {sidecar}"
-                )
-            expected = payload.get(hash_key)
-            if not expected:
-                raise ValueError(f"Opening-specialist manifest is missing {hash_key}")
-            actual = sha256_file(sidecar)
-            if actual != expected:
-                raise ValueError(
-                    "Opening-specialist policy sidecar hash mismatch: "
-                    f"{actual} != {expected}"
-                )
+        policy_path = verify_checkpoint(payload, manifest_path, "policy")
 
         self.manifest_path = manifest_path
         self.policy_checkpoint = policy_path
@@ -427,7 +393,6 @@ class OutcomeRerankerCheckpointPlayer(Player):
         super().__init__(color)
         import torch
         from catanatron.gym.model_architectures import FactoredOutcomeCritic
-        from catanatron.gym.provenance import sha256_file
 
         manifest_path = Path(manifest).expanduser().resolve()
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -440,41 +405,8 @@ class OutcomeRerankerCheckpointPlayer(Player):
                 f"{expected_chance_handling}"
             )
 
-        def resolve_checkpoint(key: str) -> Path:
-            raw = Path(payload[key])
-            path = raw if raw.is_absolute() else manifest_path.parent / raw
-            path = path.resolve()
-            if not path.is_file():
-                raise FileNotFoundError(f"Missing reranker {key}: {path}")
-            expected = payload.get(f"{key}_sha256")
-            actual = sha256_file(path)
-            if expected != actual:
-                raise ValueError(
-                    f"Reranker {key} hash mismatch: {actual} != {expected}"
-                )
-            return path
-
-        policy_path = resolve_checkpoint("policy_checkpoint")
-        critic_path = resolve_checkpoint("critic_checkpoint")
-        for label, path in (("policy", policy_path), ("critic", critic_path)):
-            for suffix, hash_key in (
-                (".meta.json", f"{label}_metadata_sha256"),
-                (".schema.json", f"{label}_schema_sha256"),
-            ):
-                sidecar = path.with_suffix(suffix)
-                if not sidecar.is_file():
-                    raise FileNotFoundError(
-                        f"Missing reranker {label} sidecar: {sidecar}"
-                    )
-                expected = payload.get(hash_key)
-                if not expected:
-                    raise ValueError(f"Reranker manifest is missing {hash_key}")
-                actual = sha256_file(sidecar)
-                if actual != expected:
-                    raise ValueError(
-                        f"Reranker {label} sidecar hash mismatch: "
-                        f"{actual} != {expected}"
-                    )
+        policy_path = verify_checkpoint(payload, manifest_path, "policy")
+        critic_path = verify_checkpoint(payload, manifest_path, "critic")
         self.top_k = int(payload["top_k"])
         self.minimum_win_probability_improvement = float(
             payload["minimum_win_probability_improvement"]

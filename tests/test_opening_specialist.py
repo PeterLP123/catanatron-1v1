@@ -122,3 +122,20 @@ def test_opening_specialist_is_registered_and_publishable_path_is_detected():
     assert checkpoint_path_from_agent("O:runs/opening-specialist.json") == (
         Path("runs/opening-specialist.json")
     )
+
+
+def test_opening_builder_cleans_up_failed_validation_and_can_retry(tmp_path):
+    from examples.colonist_1v1_build_opening_specialist import main
+
+    checkpoint = _write_policy(tmp_path)
+    output = tmp_path / "manifests" / "opening.json"
+    arguments = ["--policy", str(checkpoint), "--output", str(output)]
+    metadata = checkpoint.with_suffix(".meta.json")
+    original_metadata = metadata.read_bytes()
+    metadata.write_text("{}")
+    with pytest.raises(TypeError, match="required positional arguments"):
+        main(arguments)
+    assert list(output.parent.iterdir()) == []
+    metadata.write_bytes(original_metadata)
+    assert main(arguments) == 0
+    assert output.is_file()

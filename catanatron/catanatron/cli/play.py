@@ -17,9 +17,6 @@ from catanatron.models.player import Color
 from catanatron.models.map import NumberPlacement, build_map
 from catanatron.state_functions import get_actual_victory_points
 
-# try to suppress TF output before any potentially tf-importing modules
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-from catanatron.utils import ensure_dir, format_secs
 from catanatron.cli.cli_players import (
     CUSTOM_ACCUMULATORS,
     parse_cli_string,
@@ -199,7 +196,7 @@ def simulate(
     Examples:\n\n
         catanatron-play --players R,R,R,R --num 1000\n
         catanatron-play --players W,W,R,R --num 50000 --output data/ --output-format csv\n
-        catanatron-play --players VP,F --num 10 --output data/ --ouput-format json\n
+        catanatron-play --players VP,F --num 10 --output data/ --output-format json\n
         catanatron-play --colonist-1v1 --players F,F --num 1000 --quiet
     """
     if code:
@@ -212,9 +209,12 @@ def simulate(
     if help_players:
         return Console().print(player_help_table())
     if output and not output_format:
-        return print("--output requires --output-format")
+        raise click.UsageError("--output requires --output-format")
 
-    players = parse_cli_string(players)
+    try:
+        players = parse_cli_string(players)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc), param_hint="--players") from exc
     output_options = OutputOptions(
         output,
         output_format,
@@ -403,7 +403,7 @@ def play_batch(
     vp_accumulator = VpDistributionAccumulator()
     accumulators = [statistics_accumulator, vp_accumulator]
     if output_options.output:
-        ensure_dir(output_options.output)
+        os.makedirs(output_options.output, exist_ok=True)
     if output_options.output:
         if output_options.output_format == "csv":
             # lazy load CsvDataAccumulator since depends on pandas / numpy
@@ -537,7 +537,7 @@ def play_batch(
     # ===== GAME SUMMARY
     avg_ticks = f"{statistics_accumulator.get_avg_ticks():.2f}"
     avg_turns = f"{statistics_accumulator.get_avg_turns():.2f}"
-    avg_duration = format_secs(statistics_accumulator.get_avg_duration())
+    avg_duration = f"{statistics_accumulator.get_avg_duration():.3f} secs"
     table = Table(box=box.MINIMAL, title="Game Summary")
     table.add_column("AVG TICKS", justify="right")
     table.add_column("AVG TURNS", justify="right")

@@ -88,13 +88,3 @@ def colonist_1v1_game_kwargs(
         friendly_robber_use_visible_vp=settings.friendly_robber_use_visible_vp,
         dice_mode=settings.dice_mode,
     )
-
-
-def default_colonist_1v1_players(
-    p0: Player,
-    p1: Player,
-) -> list[Player]:
-    """Return a two-player list (colors must differ)."""
-    if p0.color == p1.color:
-        raise ValueError("Colonist 1v1 players must have different colors")
-    return [p0, p1]
