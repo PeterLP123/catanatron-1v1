@@ -508,6 +508,21 @@ Run 55 retained the fixed public-F treatment after a fresh 400-game paired promo
 `F`; do not tune its search constants on promotion round 15. Its absolute `F >= 52%` gate is
 still unmet, so this is a measured relative improvement, not an absolutely strong bot.
 
+The [run-58 budget comparison](experiments/58-search-budget.md) changed only
+`--num-simulations` to 128. It missed its fixed development gate: 41/100 wins
+against F versus 39/100 for run 55, paired +2 points with 95% CI [-3, +8], while
+p95 search latency rose from 35.88 to 82.03 ms. Keep 32 simulations for play.
+Confirmation and search-distribution training were not run.
+
+The opt-in `--leaf-evaluator public_f_own_hand_v1` adds our own hand's progress toward
+one eligible city or settlement, accounting for 2:1/3:1 ports and ordinary 4:1 trades.
+Its bounded bonus is at most half the existing public-VP coefficient. It reads no
+opponent resource identities and preserves the search/action boundary. The fixed
+formula, fresh schedules, and retention criteria are recorded in the
+[run-57 experiment](experiments/57-own-hand-puct.md).
+Run 57 passed its pilot but not the fresh confirmation (+0.25 points, 95% CI
+[-1.75, +2.25]); keep run 55's `public_f` leaf for play.
+
 The experimental `Q:` player keeps run 55's policy, public-F leaf, 32 simulations, and
 sqrt(2) PUCT constant, but adds custom public-only chance nodes for `ROLL` and
 `BUY_DEVELOPMENT_CARD`. Dice use the public dice controller/history. Development-card outcomes

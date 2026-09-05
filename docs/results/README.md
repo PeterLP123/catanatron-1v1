@@ -97,6 +97,16 @@ Published corrected evidence:
   chance extension reached 34.50% versus 32.25% against `F`, paired +2.25 points with interval
   `[-0.25, +4.75]`. Its locked interval crossed zero, so the treatment is rejected without a
   final battery and run 55 remains retained.
+- [`57-own-hand-puct-r17-candidate.json`](57-own-hand-puct-r17-candidate.json)
+  and [`parent`](57-own-hand-puct-r17-parent.json): the own-hand construction-readiness
+  leaf reached 120/400 wins versus run 55's 119/400 against F, paired +0.25 points
+  with 95% interval [-1.75, +2.25]. It is not retained; the conditional final battery
+  was skipped. [Specification and complete decision](../experiments/57-own-hand-puct.md).
 
 Pre-2026-07-12 reports remain provisional and must be re-evaluated; do not
 hand-author JSON here to preserve a legacy number.
+
+[Run 58](../experiments/58-search-budget.md) stopped at its development gate:
+128 simulations scored 41/100 against F versus 39/100 for retained run 55.
+Confirmation and final evaluation were not run, so it has no compact artifact
+in this directory.

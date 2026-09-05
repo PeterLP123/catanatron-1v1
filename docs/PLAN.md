@@ -1,7 +1,7 @@
 # Plan: evidence-first path to a stronger 1v1 bot
 
-> **Current as of 2026-08-31.** Run 55 is the retained playable wrapper over the frozen
-> run-32 supervised policy. Run 56 is rejected, and the absolute `F >= 52%` target remains
+> **Current as of 2026-09-04.** Run 55 is the retained playable wrapper over the frozen
+> run-32 supervised policy. Runs 56–58 are not retained, and the absolute `F >= 52%` target remains
 > unmet. Evidence status for every completed or proposed experiment is stated explicitly
 > below. Executable GPU queue
 > definitions live in `catanatron.gym.experiment_backlog`, the generated view is
@@ -207,6 +207,23 @@ weak final battery at R/W/VP/F = 96/98/100/38%. Retain run 55 as the playable wr
 run 32. Run 56 added public dice and development-card chance nodes, but its round-16 gain
 was inconclusive: 34.50% versus 32.25%, paired +2.25 points with interval
 `[-0.25, +4.75]`. Reject run 56 without tuning. The absolute `F >= 52%` gate remains unmet.
+
+Run `57` added only a bounded own-hand construction-readiness bonus to run 55's
+public-F leaf. The pilot passed: 38% versus 35% against F, plus 54/100 wins in a
+direct match against run 55. Fresh 400-game-per-bot confirmation was inconclusive:
+30.0% versus 29.75%, paired +0.25 points with 95% interval [-1.75, +2.25], and VP
+margin -0.0325. All 1,120 evaluation games completed without errors or truncations.
+Retain run 55, skip the conditional final battery, and do not tune v1 on these
+consumed schedules. See the [fixed specification and results](experiments/57-own-hand-puct.md).
+
+Run `58` changed only run 55's simulation budget from 32 to 128. Both operational
+diagnostics passed, but p95 search latency rose from 35.88 to 82.03 ms on matching
+seeds. The fresh F pilot scored 41/100 versus 39/100, paired +2 points with 95%
+interval [-3, +8], below the predeclared +3-point development gate. The direct
+score was 53–47 with +0.31 VP margin. All 340 games completed without errors or
+truncations. Retain run 55; confirmation, the final battery and root-visit
+distillation were not run. Promotion/final round 18 remain unconsumed. See the
+[fixed budget comparison and decision](experiments/58-search-budget.md).
 
 Reconstruct a missing early parent with `scripts/run_hybrid_bc_parent.sh`; replay the first
 pilot with `scripts/run_strong_bot_path.sh`. `scripts/run_dagger_f_next.sh` remains only for

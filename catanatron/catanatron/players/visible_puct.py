@@ -22,6 +22,7 @@ from catanatron.gym.model_schema import (
     read_model_schema,
     validate_model_schema,
 )
+from catanatron.models.decks import CITY_COST_FREQDECK, SETTLEMENT_COST_FREQDECK
 from catanatron.models.enums import CITY, RESOURCES, SETTLEMENT, ActionType
 from catanatron.models.player import Color, Player
 from catanatron.players.checkpoint_manifest import verify_checkpoint
@@ -29,11 +30,13 @@ from catanatron.players.learned import (
     TorchBcCheckpointPlayer,
     _preserve_inference_loader_rng,
 )
-from catanatron.players.leaf_evaluation import leaf_win_probability
+from catanatron.players.leaf_evaluation import W_VP, leaf_win_probability
 from catanatron.players.value import DEFAULT_WEIGHTS, value_production
 from catanatron.state_functions import (
     get_longest_road_length,
     get_played_dev_cards,
+    get_player_freqdeck,
+    player_key,
     player_num_dev_cards,
     player_num_resource_cards,
 )
@@ -124,6 +127,56 @@ def public_f_leaf_value(game: "Game", color: Color) -> float:
     return leaf_win_probability(game, color, public_f_position_value)
 
 
+def own_hand_build_readiness(game: "Game", color: Color) -> float:
+    """Progress toward one available city/settlement, using only our hand and ports.
+
+    Reserve the construction cost before trading surplus cards at the best owned
+    port rate. Each trade fills one missing card. This is an affordability
+    estimate, ignoring bank shortages and future rolls. Ineligible builds and
+    initial placement receive no bonus; the same hand is never counted twice.
+    """
+    state = game.state
+    if state.is_initial_build_phase:
+        return 0.0
+    key = player_key(state, color)
+    costs = []
+    if (
+        state.buildings_by_color[color][SETTLEMENT]
+        and state.player_state[f"{key}_CITIES_AVAILABLE"] > 0
+    ):
+        costs.append(CITY_COST_FREQDECK)
+    if state.player_state[
+        f"{key}_SETTLEMENTS_AVAILABLE"
+    ] > 0 and state.board.buildable_node_ids(color):
+        costs.append(SETTLEMENT_COST_FREQDECK)
+    if not costs:
+        return 0.0
+    hand = get_player_freqdeck(state, color)
+    ports = state.board.get_player_port_resources(color)
+    rates = [
+        2 if resource in ports else 3 if None in ports else 4 for resource in RESOURCES
+    ]
+    readiness = 0.0
+    for cost in costs:
+        missing = sum(max(needed - held, 0) for held, needed in zip(hand, cost))
+        trades = sum(
+            max(held - needed, 0) // rate
+            for held, needed, rate in zip(hand, cost, rates)
+        )
+        readiness = max(readiness, 1.0 - max(missing - trades, 0) / sum(cost))
+    return readiness
+
+
+def own_hand_f_leaf_value(game: "Game", color: Color) -> float:
+    """Run-55 leaf plus at most half a public VP of own-hand build readiness."""
+    baseline = public_f_leaf_value(game, color)
+    if baseline in (0.0, 1.0):
+        return baseline
+    bonus = 0.5 * W_VP * own_hand_build_readiness(game, color)
+    # Stable sigmoid(logit(baseline) + bonus), without taking log(0).
+    return baseline / (baseline + (1.0 - baseline) * math.exp(-bonus))
+
+
 class _PuctNode:
     def __init__(
         self,
@@ -175,9 +228,13 @@ class VisibleSameTurnPuctPlayer(Player):
             raise ValueError("Visible PUCT num_simulations must be positive")
         if not math.isfinite(self.c_puct) or self.c_puct <= 0:
             raise ValueError("Visible PUCT c_puct must be finite and positive")
-        if self.leaf_evaluator not in {"outcome_critic", "public_f"}:
+        if self.leaf_evaluator not in {
+            "outcome_critic",
+            "public_f",
+            "public_f_own_hand_v1",
+        }:
             raise ValueError(
-                "Visible PUCT leaf_evaluator must be outcome_critic or public_f"
+                "Visible PUCT leaf_evaluator must be outcome_critic, public_f, or public_f_own_hand_v1"
             )
 
         declared_visible = frozenset(
@@ -300,9 +357,13 @@ class VisibleSameTurnPuctPlayer(Player):
         if winner is not None:
             return 1.0 if winner == self.color else 0.0
         self.decision_stats["value_evaluations"] += 1
-        if self.leaf_evaluator == "public_f":
+        if self.leaf_evaluator in {"public_f", "public_f_own_hand_v1"}:
             self.decision_stats["public_f_evaluations"] += 1
-            return public_f_leaf_value(game, self.color)
+            return (
+                own_hand_f_leaf_value(game, self.color)
+                if self.leaf_evaluator == "public_f_own_hand_v1"
+                else public_f_leaf_value(game, self.color)
+            )
         observation = self._observation(game)
         assert self.critic is not None
         with torch.no_grad():

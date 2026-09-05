@@ -26,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--c-puct", type=float, default=2**0.5)
     parser.add_argument(
         "--leaf-evaluator",
-        choices=("outcome_critic", "public_f"),
+        choices=("outcome_critic", "public_f", "public_f_own_hand_v1"),
         default="outcome_critic",
     )
     parser.add_argument("--output", type=Path, required=True)

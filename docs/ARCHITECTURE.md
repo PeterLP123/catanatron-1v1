@@ -101,6 +101,10 @@ flowchart TD
    Mixed roots containing a chance or hidden-transfer action fall back to the frozen policy,
    and opponent turns are leaves. Its public-F option omits resource-composition hand synergy,
    making the leaf invariant to an opponent's hidden resource mix.
+   The experimental `public_f_own_hand_v1` leaf adds bounded construction readiness
+   from the root player's own hand and ports; it never evaluates an opponent's
+   private resource composition.
+   Its run-57 confirmation was inconclusive, so the retained leaf remains `public_f`.
    The experimental `Q:` wrapper widens that exact run-55 search to public dice outcomes and
    a development-card belief distribution formed from the public deck size plus opponents'
    hidden unplayed-card counts. It uses a custom public-only successor spectrum, never the

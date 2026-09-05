@@ -165,3 +165,119 @@ def test_public_f_leaf_is_invariant_to_opponent_hidden_resource_mix(tmp_path):
     game.state.player_state[f"{opponent_key}_{RESOURCES[-1]}_IN_HAND"] = 8
     second = public_f_leaf_value(game, Color.BLUE)
     assert first == second
+
+
+@pytest.fixture
+def own_hand_game():
+    from catanatron.game import Game
+    from catanatron.models.player import Color, RandomPlayer
+
+    game = Game(
+        [RandomPlayer(Color.BLUE), RandomPlayer(Color.RED)],
+        seed=57,
+        colonist_1v1=True,
+        shuffle_players=False,
+    )
+    game.execute(game.playable_actions[0])  # One real settlement to upgrade.
+    game.state.is_initial_build_phase = False
+    return game
+
+
+@pytest.mark.parametrize(
+    "ports, ore, expected", [((), 7, 0.8), ((None,), 6, 0.8), (("ORE",), 7, 1.0)]
+)
+def test_build_readiness_reserves_cost_before_port_trades(
+    own_hand_game, monkeypatch, ports, ore, expected
+):
+    from catanatron.models.player import Color
+    from catanatron.players.visible_puct import own_hand_build_readiness
+    from catanatron.state_functions import player_key
+
+    game = own_hand_game
+    key = player_key(game.state, Color.BLUE)
+    game.state.player_state[f"{key}_ORE_IN_HAND"] = ore
+    monkeypatch.setattr(
+        game.state.board, "get_player_port_resources", lambda color: set(ports)
+    )
+    assert own_hand_build_readiness(game, Color.BLUE) == pytest.approx(expected)
+
+
+def test_build_readiness_excludes_unavailable_builds_and_initial_placement(
+    own_hand_game, monkeypatch
+):
+    from catanatron.models.player import Color
+    from catanatron.models.enums import RESOURCES
+    from catanatron.players.visible_puct import own_hand_build_readiness
+    from catanatron.state_functions import player_key
+
+    game = own_hand_game
+    key = player_key(game.state, Color.BLUE)
+    for resource in RESOURCES:
+        game.state.player_state[f"{key}_{resource}_IN_HAND"] = 4
+    game.state.player_state[f"{key}_CITIES_AVAILABLE"] = 0
+    assert own_hand_build_readiness(game, Color.BLUE) == 0.0
+    monkeypatch.setattr(game.state.board, "buildable_node_ids", lambda color: [42])
+    assert own_hand_build_readiness(game, Color.BLUE) == 1.0
+    game.state.player_state[f"{key}_SETTLEMENTS_AVAILABLE"] = 0
+    assert own_hand_build_readiness(game, Color.BLUE) == 0.0
+    game.state.player_state[f"{key}_CITIES_AVAILABLE"] = 4
+    game.state.is_initial_build_phase = True
+    assert own_hand_build_readiness(game, Color.BLUE) == 0.0
+
+
+def test_own_hand_leaf_responds_only_to_our_composition_and_preserves_terminal_values(
+    own_hand_game, tmp_path, monkeypatch
+):
+    from catanatron.models.enums import RESOURCES
+    from catanatron.models.player import Color
+    from catanatron.players.visible_puct import (
+        VisibleSameTurnPuctPlayer,
+        own_hand_f_leaf_value,
+        public_f_leaf_value,
+    )
+    from catanatron.state_functions import player_key
+
+    game = own_hand_game
+    monkeypatch.setattr(
+        game.state.board, "get_player_port_resources", lambda color: set()
+    )
+    player = VisibleSameTurnPuctPlayer(
+        Color.BLUE, _write_manifest(tmp_path, leaf_evaluator="public_f_own_hand_v1")
+    )
+    key = player_key(game.state, Color.BLUE)
+    assert player._leaf_value(game) == public_f_leaf_value(game, Color.BLUE)
+    game.state.player_state[f"{key}_WOOD_IN_HAND"] = 5
+    poorly_matched = player._leaf_value(game)
+    public_before = public_f_leaf_value(game, Color.BLUE)
+    game.state.player_state[f"{key}_WOOD_IN_HAND"] = 0
+    game.state.player_state[f"{key}_ORE_IN_HAND"] = 3
+    game.state.player_state[f"{key}_WHEAT_IN_HAND"] = 2
+    ready = player._leaf_value(game)
+    assert public_f_leaf_value(game, Color.BLUE) == public_before
+    assert ready > poorly_matched > public_before
+
+    enemy_key = player_key(game.state, Color.RED)
+    hidden_values = []
+    decisions = []
+    # Same public card count, two different hidden compositions. Search must
+    # give the same leaf value and action with its new evaluator active.
+    from catanatron.models.actions import generate_playable_actions
+    from catanatron.models.enums import ActionPrompt
+
+    game.state.current_prompt = ActionPrompt.PLAY_TURN
+    game.state.current_player_index = game.state.color_to_index[Color.BLUE]
+    game.state.player_state[f"{key}_HAS_ROLLED"] = True
+    for hidden_resource in (RESOURCES[0], RESOURCES[-1]):
+        for resource in RESOURCES:
+            game.state.player_state[f"{enemy_key}_{resource}_IN_HAND"] = (
+                8 if resource == hidden_resource else 0
+            )
+        game.playable_actions = generate_playable_actions(game.state)
+        hidden_values.append(player._leaf_value(game))
+        decisions.append(player.decide(game, game.playable_actions))
+    assert hidden_values[0] == hidden_values[1]
+    assert decisions[0] == decisions[1]
+    assert player.stats_summary()["search_decisions"] == 2
+    for winner, expected in ((Color.BLUE, 1.0), (Color.RED, 0.0)):
+        monkeypatch.setattr(game, "winning_color", lambda: winner)
+        assert own_hand_f_leaf_value(game, Color.BLUE) == expected

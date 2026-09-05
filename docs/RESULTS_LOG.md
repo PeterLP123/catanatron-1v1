@@ -50,6 +50,10 @@ battery. Run 55 is therefore the retained playable wrapper, while run 32 remains
 supervised policy and the absolute `F >= 52%` target remains unmet. A public-chance extension
 then passed its operational and development gates, but its locked promotion interval crossed
 zero; run 56 is rejected without tuning and does not displace run 55.
+Run 57 then added only a bounded own-hand construction-readiness term. Its pilot
+was positive, but a fresh 400-game-per-bot confirmation was 30.0% versus 29.75%
+against F, paired +0.25 points with 95% interval [-1.75, +2.25]. The final battery
+was skipped after that failed gate; run 55 remains retained.
 
 A clean repository-local reconstruction independently preserved the earlier boundary:
 promotion-suite `F` moved from 20% for the hybrid-BC parent to 36% for DAgger iteration 0,
@@ -241,6 +245,7 @@ The historical runs motivate tests but do not prove a root cause:
 | 2026-08-30 | `54-visible-same-turn-puct-s20260830` | manifest `1c398828cc4d` | `dev` round 54 | Rejected before promotion; critic-guided search passed all 9 operational gates, then improved `F` by only +2 points (35% vs 33%) against the required +3, despite VP diff +0.28 | Local paired report `79e0147f4e34`; promotion round 14 untouched |
 | 2026-08-30 | `55-visible-public-f-puct-s20260830` | manifest `36e4707e7621` | `promotion` / `final` round 15 | Retained playable wrapper; 35.75% vs 32.25% `F`, paired +3.5 points (95% CI +0.25 to +6.75), VP diff +0.525; final R/W/VP/F 96/98/100/38% | [`55-visible-public-f-puct-final.json`](results/55-visible-public-f-puct-final.json); paired report `ed18d345c2eb` |
 | 2026-08-30 | `56-visible-public-chance-puct-s20260830` | manifest `7d22c13caa7f` | `promotion` round 16 | Rejected; public dice/dev-card chance search passed 12/12 operational gates and dev, then scored 34.50% vs 32.25% `F`, paired +2.25 points (95% CI -0.25 to +4.75), VP diff +0.3525; final skipped | [`candidate`](results/56-visible-public-chance-puct-r16-candidate.json) / [`parent`](results/56-visible-public-chance-puct-r16-parent.json); paired report `1cbdb86b3081` |
+| 2026-09-04 | `57-own-hand-public-f-s20260904` | manifest `e2fb8e57e211` | `promotion` round 17 | Not retained; own-hand construction readiness passed its operational and pilot gates, but fresh confirmation was 30.0% vs run 55 at 29.75% `F`, paired +0.25 points (95% CI -1.75 to +2.25), VP diff -0.0325; final skipped | [`candidate`](results/57-own-hand-puct-r17-candidate.json) / [`parent`](results/57-own-hand-puct-r17-parent.json); paired report `d53cb47f6889` |
 | 2026-07-16 | `20-hard-bc-actual-s101` | `2f4ab72a895a` | `final` | Rejected; 0/4 gates, `F` 0%, weighted score 0.3315 | [`20-hard-bc-actual-s101.json`](results/20-hard-bc-actual-s101.json) |
 | 2026-07-17 | `22-hybrid-bc-raw-f-final` | `886f5b374011` | `final` | Rejected F gate; 24% wins, -2.50 VP difference | [`22-hybrid-bc-raw-f-final.json`](results/22-hybrid-bc-raw-f-final.json) |
 | 2026-07-17 | `23-hybrid-bc-full-final` | `886f5b374011` | `final` | Rejected F gate; R/W/VP 100/98/100%, F 24%, weighted score 0.5733 | UCL run artifact |
@@ -496,6 +501,35 @@ accounted for all 400 games with zero errors: 34.50% versus 32.25%, paired +2.25
 strictly clear zero, reject manifest `7d22c13caa7f`, skip the final battery, perform no tuning
 on the consumed round, and retain run 55. Diagnostic and promotion SHA-256 values are
 `66c804e0c6f7` and `1cbdb86b3081`.
+
+Run `57` kept run 55's policy, 32 simulations, PUCT constant, deterministic action
+boundary, and move rule fixed. Its only change was a bounded own-hand leaf bonus:
+reserve the cost of an eligible city/settlement, account for surplus trades at owned
+port rates, and add at most half a public VP of readiness. The unit checks verify
+known-hand sensitivity and invariance to opponent hidden-resource composition.
+The [predeclared experiment](experiments/57-own-hand-puct.md) passed all nine
+operational gates and its 100-game-per-bot development threshold: 38% versus 35%
+against F, plus a 54–46 direct score against run 55. The independent 400-game
+confirmation did not replicate that gain: 120 wins versus 119, paired +0.25 points
+with 95% interval [-1.75, +2.25], and VP margin -0.0325. All 1,120 evaluation games
+completed without errors or truncations. Do not promote or tune this v1 treatment
+on the consumed schedules; retain run 55 and skip the conditional final battery.
+Candidate manifest and paired-confirmation SHA-256 values are `e2fb8e57e211` and
+`d53cb47f6889`; the frozen source snapshot and full reports remain in the run directory.
+
+Run `58` is development evidence only. Its
+[fixed 128-versus-32 simulation comparison](experiments/58-search-budget.md)
+kept the run-55 policy, public-F leaf and search boundary unchanged. Both
+20-game operational diagnostics passed; p95 search latency rose from 35.88 to
+82.03 ms. Against F on fresh development round 59, the candidate scored 41/100
+versus 39/100, paired +2 points with 95% interval [-3, +8] and +0.50 VP-margin
+gain. Direct development round 60 scored 53–47 with +0.31 VP margin. All 340
+evaluation games completed without errors or truncations. The F gain missed
+the predeclared +3-point gate, so reject this fixed treatment and retain run 55.
+No confirmation, final battery, distillation corpus or training followed; locked
+promotion/final round 18 remain unconsumed. Candidate-manifest and paired-report
+SHA-256 values are `b7efc26e78be` and `1b16dabbddf0`. No compact promotion/final
+artifact is published for this development-only result.
 
 ## Record a corrected result
 
